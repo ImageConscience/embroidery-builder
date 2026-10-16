@@ -12,8 +12,10 @@ import { PRICING, priceEmbroidery } from "../lib/pricing.server";
 const MAX_LOGO = 20 * 1024 * 1024;
 const MAX_MOCKUP = 8 * 1024 * 1024;
 
-function bad(error: string, status = 400) {
-  return Response.json({ ok: false, error }, { status });
+// Errors go back with status 200: Shopify's app proxy replaces error statuses with its own
+// page, which would hide the message from the customer.
+function bad(error: string, _status = 400) {
+  return Response.json({ ok: false, error }, { status: 200 });
 }
 function str(v: FormDataEntryValue | null, max = 500) {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
