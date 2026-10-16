@@ -1,0 +1,13 @@
+{
+  "name": "embroidery-builder",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ApronWarehouse custom embroidery builder (Shopify app). Placeholder server until the app is scaffolded.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
