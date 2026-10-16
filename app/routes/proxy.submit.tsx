@@ -7,7 +7,7 @@ import { PRICING, priceEmbroidery } from "../lib/pricing.server";
 
 // Storefront submission: POST https://<shop>/apps/embroidery/submit (multipart form).
 // Saves the design, then creates a draft order priced on the server and returns its checkout link.
-// Fields: logo (file), mockup (png), spec (JSON), name, email, phone, company, notes, rights.
+// Fields: logo (file), mockup (png), spec (JSON), email (optional), notes, rights.
 
 const MAX_LOGO = 20 * 1024 * 1024;
 const MAX_MOCKUP = 8 * 1024 * 1024;
@@ -40,7 +40,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const email = str(form.get("email"), 200);
   if (!(logo instanceof File) || logo.size === 0) return bad("Please upload your logo.");
   if (logo.size > MAX_LOGO) return bad("That logo file is over 20 MB.");
-  if (!name || !/.+@.+\..+/.test(email)) return bad("Please enter your name and email.");
+  if (email && !/.+@.+\..+/.test(email)) return bad("Please check your email address.");
   if (str(form.get("rights")) !== "yes") return bad("Please confirm you have the rights to use this logo.");
 
   let spec: any;
@@ -91,7 +91,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       update.logoFileId = await uploadToShopifyFiles(
         admin,
         { name: `${ref}-logo-${logo.name}`, type: logo.type, bytes: logoBytes },
-        `${ref} logo from ${name}`,
+        `${ref} logo${name ? ` from ${name}` : ""}`,
       );
     } catch (e) {
       console.error(`[${ref}] logo upload failed`, e);

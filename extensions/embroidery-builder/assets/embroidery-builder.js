@@ -878,14 +878,10 @@
       ["Quantity", String(this.qty)], ["Embroidery + setup", money(q.price.total)], ["Total before tax and shipping", money(q.grand)]
     ];
     p.appendChild(el("table", { class: "emb-spec" }, "<tbody>" + spec.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") + "</tbody>"));
-    var fields = [["name", "Name", "text", true], ["email", "Email", "email", true], ["phone", "Phone", "tel", false], ["company", "Company", "text", false]];
-    fields.forEach(function (f) {
-      var lab = el("label", { class: "emb-label" }, esc(f[1]) + (f[3] ? " *" : ""));
-      var inp = el("input", { class: "emb-input", type: f[2], value: self.contact[f[0]], autocomplete: f[0] === "company" ? "organization" : f[0] });
-      if (f[3]) inp.required = true;
-      inp.addEventListener("input", function () { self.contact[f[0]] = inp.value; self.updateSubmit(); });
-      lab.appendChild(inp); p.appendChild(lab);
-    });
+    var emailLab = el("label", { class: "emb-label" }, "Email (optional)");
+    var emailIn = el("input", { class: "emb-input", type: "email", value: this.contact.email, autocomplete: "email", placeholder: "We'll fill it in at checkout" });
+    emailIn.addEventListener("input", function () { self.contact.email = emailIn.value; self.updateSubmit(); });
+    emailLab.appendChild(emailIn); p.appendChild(emailLab);
     var notes = el("label", { class: "emb-label" }, "Notes for our team");
     var ta = el("textarea", { class: "emb-input", rows: "3" }); ta.value = this.contact.notes;
     ta.addEventListener("input", function () { self.contact.notes = ta.value; });
@@ -904,7 +900,8 @@
   Builder.prototype.updateSubmit = function () {
     var b = this.panel && this.panel.querySelector("[data-submit]");
     if (!b) return;
-    var ok = this.rights && this.contact.name.trim() && /.+@.+\..+/.test(this.contact.email) && !this.submitting && this.qty >= (this.pricing.minimum || 1);
+    var em = this.contact.email.trim();
+    var ok = this.rights && (!em || /.+@.+\..+/.test(em)) && !this.submitting && this.qty >= (this.pricing.minimum || 1);
     b.disabled = !ok;
   };
 

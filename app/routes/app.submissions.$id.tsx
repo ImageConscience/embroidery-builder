@@ -113,8 +113,16 @@ export default function SubmissionDetail() {
         ) : null}
       </s-section>
       <s-section slot="aside" heading="Customer">
-        <s-paragraph>{d.customer.name}{d.customer.company ? ` · ${d.customer.company}` : ""}</s-paragraph>
-        <s-paragraph><s-link href={`mailto:${d.customer.email}`}>{d.customer.email}</s-link></s-paragraph>
+        {(() => {
+          const nm = d.payment?.customerName || d.customer.name;
+          const em = d.payment?.orderEmail || d.customer.email;
+          return (
+            <>
+              <s-paragraph>{nm || "Not known until checkout"}{d.customer.company ? ` · ${d.customer.company}` : ""}</s-paragraph>
+              {em ? <s-paragraph><s-link href={`mailto:${em}`}>{em}</s-link></s-paragraph> : null}
+            </>
+          );
+        })()}
         {d.customer.phone ? <s-paragraph>{d.customer.phone}</s-paragraph> : null}
         {d.customer.notes ? <s-paragraph>Notes: {d.customer.notes}</s-paragraph> : null}
         <s-paragraph>Received {new Date(d.createdAt).toLocaleString()}</s-paragraph>

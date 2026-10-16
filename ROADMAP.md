@@ -15,6 +15,12 @@
 - Apply ApronWarehouse's apron volume discounts inside the embroidery checkout
 - Option to add an embroidered design to the regular cart alongside other items
 
+## Save designs and accounts
+- "Save design" available at any step of the builder
+- Saving prompts the customer to sign in or create an account (account creation driven by saving)
+- Account holders see saved, unfinished designs on their account page and can resume, check out or delete them
+- Later: team collaboration (share a design with coworkers, comment, approve before ordering)
+
 ## Customer accounts: "My designs"
 - Customer account page (customer account UI extension) listing the customer's designs and orders
 - Saved logos: reuse a logo on a new apron without re-uploading

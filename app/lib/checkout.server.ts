@@ -33,8 +33,8 @@ export async function createCheckout(admin: AdminLike, c: CheckoutInput) {
     {
       variables: {
         input: {
-          email: c.email,
-          note: `Custom embroidery design ${c.ref} for ${c.name}. Mockup, logo and specs are in the Embroidery Builder app.`,
+          ...(c.email ? { email: c.email } : {}),
+          note: `Custom embroidery design ${c.ref}. Mockup, logo and specs are in the Embroidery Builder app.`,
           tags: ["embroidery-builder", c.ref],
           lineItems: [
             {
@@ -82,7 +82,7 @@ export async function draftOrderStatus(admin: AdminLike, id: string) {
   const res = await admin.graphql(
     `#graphql
     query draftStatus($id: ID!) {
-      draftOrder(id: $id) { status totalPriceSet { shopMoney { amount currencyCode } } order { id name } }
+      draftOrder(id: $id) { status totalPriceSet { shopMoney { amount currencyCode } } order { id name email customer { displayName } } }
     }`,
     { variables: { id } },
   );
@@ -93,5 +93,7 @@ export async function draftOrderStatus(admin: AdminLike, id: string) {
     total: d.totalPriceSet?.shopMoney as { amount: string; currencyCode: string } | undefined,
     orderName: (d.order?.name as string) ?? null,
     orderId: (d.order?.id as string) ?? null,
+    orderEmail: (d.order?.email as string) ?? null,
+    customerName: (d.order?.customer?.displayName as string) ?? null,
   };
 }

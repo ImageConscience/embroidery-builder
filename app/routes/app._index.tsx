@@ -87,7 +87,7 @@ export default function Submissions() {
                   </s-table-cell>
                   <s-table-cell>{new Date(r.createdAt).toLocaleString()}</s-table-cell>
                   <s-table-cell>
-                    {r.customerName}
+                    {r.customerName || r.email || "At checkout"}
                     {r.company ? ` · ${r.company}` : ""}
                   </s-table-cell>
                   <s-table-cell>
