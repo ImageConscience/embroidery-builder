@@ -2,8 +2,11 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { uploadToShopifyFiles } from "../lib/files.server";
+import { createCheckout } from "../lib/checkout.server";
+import { PRICING, priceEmbroidery } from "../lib/pricing.server";
 
 // Storefront submission: POST https://<shop>/apps/embroidery/submit (multipart form).
+// Saves the design, then creates a draft order priced on the server and returns its checkout link.
 // Fields: logo (file), mockup (png), spec (JSON), name, email, phone, company, notes, rights.
 
 const MAX_LOGO = 20 * 1024 * 1024;
@@ -20,7 +23,7 @@ export const loader = () => bad("Use POST", 405);
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.public.appProxy(request);
-  if (!session) return bad("This store hasn't finished installing the app.", 503);
+  if (!session || !admin) return bad("This store hasn't finished installing the app.", 503);
 
   let form: FormData;
   try {
@@ -45,6 +48,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return bad("Design details were missing. Please try again.");
   }
   const quantity = Math.max(1, Math.min(100000, parseInt(spec?.quantity, 10) || 1));
+  if (quantity < PRICING.minimum) return bad(`Custom embroidery has a ${PRICING.minimum}-apron minimum.`);
+  if (!spec?.variant?.id) return bad("Please choose an apron color.");
+  // Price on the server. Stitches and colors come from the builder's estimate (charged as final).
+  const stitches = Math.max(500, Number(spec?.estimate?.stitches) || 0);
+  const colorCount = Math.max(1, Math.min(20, parseInt(spec?.colorCount, 10) || 1));
+  const price = priceEmbroidery(quantity, stitches, colorCount);
+  spec.serverPrice = price;
 
   const logoBytes = new Uint8Array(await logo.arrayBuffer());
   const mockupBytes =
@@ -64,7 +74,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       variantTitle: spec?.variant?.title ?? null,
       zoneLabel: spec?.zone?.label ?? null,
       quantity,
-      estTotal: typeof spec?.price?.total === "number" ? spec.price.total : null,
+      estTotal: price.embroideryTotal,
       spec,
       logoName: logo.name.slice(0, 200),
       logoType: logo.type || "application/octet-stream",
@@ -74,7 +84,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Files go to Shopify Files; if that fails, keep the bytes in the database instead.
   const update: Record<string, unknown> = {};
-  if (admin) {
+  {
     try {
       update.logoFileId = await uploadToShopifyFiles(
         admin,
@@ -97,11 +107,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         update.mockupData = Buffer.from(mockupBytes);
       }
     }
-  } else {
-    update.logoData = Buffer.from(logoBytes);
-    if (mockupBytes) update.mockupData = Buffer.from(mockupBytes);
+  }
+
+  let checkoutUrl: string;
+  try {
+    const colorsLabel = (spec?.colors ?? [])
+      .map((c: any) => (c?.pantone ? `${c.pantone} (${c.hex})` : c?.hex))
+      .filter(Boolean)
+      .join(", ");
+    const co = await createCheckout(admin, {
+      ref,
+      email,
+      name,
+      variantId: spec.variant.id,
+      quantity,
+      zoneLabel: String(spec?.zone?.label ?? "Logo"),
+      sizeLabel: `${spec?.size?.widthIn ?? "?"}″ × ${spec?.size?.heightIn ?? "?"}″`,
+      colorsLabel,
+      stitches,
+      perApron: price.perApron,
+      setupFee: price.setupFee,
+    });
+    update.draftOrderId = co.draftOrderId;
+    update.checkoutUrl = co.checkoutUrl;
+    update.status = "awaiting_payment";
+    checkoutUrl = co.checkoutUrl;
+  } catch (e) {
+    console.error(`[${ref}] checkout creation failed`, e);
+    update.status = "checkout_failed";
+    await prisma.submission.update({ where: { id: sub.id }, data: update });
+    return bad(`We saved your design (${ref}) but couldn't start checkout. Please contact us and mention ${ref}.`, 502);
   }
   await prisma.submission.update({ where: { id: sub.id }, data: update });
 
-  return Response.json({ ok: true, reference: ref });
+  return Response.json({ ok: true, reference: ref, checkoutUrl });
 };

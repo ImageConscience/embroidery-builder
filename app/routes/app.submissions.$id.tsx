@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { fileUrls } from "../lib/files.server";
+import { draftOrderStatus } from "../lib/checkout.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -11,6 +12,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!s) throw new Response("Not found", { status: 404 });
 
   const urls = await fileUrls(admin, [s.logoFileId ?? "", s.mockupFileId ?? ""]).catch(() => ({}) as Record<string, string | null>);
+  const payment = s.draftOrderId ? await draftOrderStatus(admin, s.draftOrderId).catch(() => null) : null;
   const dataUrl = (b: Uint8Array | null, type: string) =>
     b ? `data:${type};base64,${Buffer.from(b).toString("base64")}` : null;
 
@@ -24,6 +26,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     logoPending: !!s.logoFileId && !urls[s.logoFileId],
     mockupUrl: (s.mockupFileId && urls[s.mockupFileId]) || dataUrl(s.mockupData, "image/png"),
     mockupPending: !!s.mockupFileId && !urls[s.mockupFileId],
+    status: s.status,
+    checkoutUrl: s.checkoutUrl,
+    payment,
   };
 };
 
@@ -83,6 +88,29 @@ export default function SubmissionDetail() {
             ))}
           </s-table-body>
         </s-table>
+      </s-section>
+      <s-section slot="aside" heading="Payment">
+        {d.payment?.status === "COMPLETED" ? (
+          <s-paragraph>
+            <s-badge tone="success">Paid</s-badge> Order {d.payment.orderName ?? ""}
+          </s-paragraph>
+        ) : d.payment ? (
+          <s-paragraph>
+            <s-badge tone="warning">Not paid yet</s-badge> Checkout started; the customer hasn't paid.
+          </s-paragraph>
+        ) : (
+          <s-paragraph>
+            <s-badge tone="critical">No checkout</s-badge> {d.status === "checkout_failed" ? "Checkout couldn't be created. Follow up with the customer." : "No checkout was created."}
+          </s-paragraph>
+        )}
+        {d.payment?.total ? (
+          <s-paragraph>
+            Total {Number(d.payment.total.amount).toLocaleString("en-US", { style: "currency", currency: d.payment.total.currencyCode })}
+          </s-paragraph>
+        ) : null}
+        {d.checkoutUrl && d.payment?.status !== "COMPLETED" ? (
+          <s-link href={d.checkoutUrl} target="_blank">Checkout link</s-link>
+        ) : null}
       </s-section>
       <s-section slot="aside" heading="Customer">
         <s-paragraph>{d.customer.name}{d.customer.company ? ` · ${d.customer.company}` : ""}</s-paragraph>

@@ -4,10 +4,16 @@
 - Product page block "Embroidery builder": apron color + location, logo upload (background removal, color detection), place/size within limits, hex/Pantone colors, stitch + price estimate, review and submit
 - Submissions saved; logo + mockup in Shopify Files; admin Submissions list and detail
 
-## Next: pay at the end of the flow
-- Replace "submit for quote" with checkout: aprons + embroidery charges paid in one order
-- Design reference (EMB-####), mockup and specs attached to the order
-- Approach and policy decisions: see "Checkout decisions" below
+## Shipped: pay at the end of the flow
+- Builder ends in Shopify checkout (draft order): aprons + embroidery per apron + one-time setup, priced on the server
+- Estimate is charged as the final price (decided Oct 16)
+- Order lines carry the design reference (EMB-####), location, size, colors and estimated stitches
+- Admin shows checkout started / paid with the order number
+
+## Checkout follow-ups
+- Server-side stitch recount from the uploaded logo (today the server trusts the builder's estimate; price tiers and fees are server-side)
+- Apply ApronWarehouse's apron volume discounts inside the embroidery checkout
+- Option to add an embroidered design to the regular cart alongside other items
 
 ## Customer accounts: "My designs"
 - Customer account page (customer account UI extension) listing the customer's designs and orders

@@ -5,19 +5,47 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const rows = await prisma.submission.findMany({
     where: { shop: session.shop },
     orderBy: { createdAt: "desc" },
     take: 100,
     select: {
       id: true, number: true, createdAt: true, status: true, customerName: true, email: true,
-      company: true, productTitle: true, variantTitle: true, zoneLabel: true, quantity: true, estTotal: true,
+      company: true, draftOrderId: true, productTitle: true, variantTitle: true, zoneLabel: true, quantity: true, estTotal: true,
     },
   });
+  // Live payment status from the draft orders (paid = draft completed into an order).
+  const ids = rows.map((r) => r.draftOrderId).filter(Boolean) as string[];
+  const paid: Record<string, string> = {};
+  if (ids.length) {
+    try {
+      const res = await admin.graphql(
+        `#graphql
+        query draftStatuses($ids: [ID!]!) { nodes(ids: $ids) { id ... on DraftOrder { status order { name } } } }`,
+        { variables: { ids } },
+      );
+      const json = (await res.json()) as any;
+      for (const n of json?.data?.nodes ?? []) if (n?.status === "COMPLETED") paid[n.id] = n.order?.name ?? "";
+    } catch {
+      // status falls back to the stored value
+    }
+  }
   return {
-    rows: rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+    rows: rows.map(({ draftOrderId, ...r }) => ({
+      ...r,
+      status: draftOrderId && draftOrderId in paid ? "paid" : r.status,
+      orderName: draftOrderId ? paid[draftOrderId] ?? null : null,
+      createdAt: r.createdAt.toISOString(),
+    })),
   };
+};
+
+const STATUS: Record<string, string> = {
+  new: "New",
+  awaiting_payment: "Checkout started",
+  checkout_failed: "Checkout failed",
+  paid: "Paid",
 };
 
 const money = (n: number | null) =>
@@ -39,6 +67,7 @@ export default function Submissions() {
           <s-table>
             <s-table-header-row>
               <s-table-header>Reference</s-table-header>
+              <s-table-header>Status</s-table-header>
               <s-table-header>Received</s-table-header>
               <s-table-header>Customer</s-table-header>
               <s-table-header>Apron</s-table-header>
@@ -51,6 +80,10 @@ export default function Submissions() {
                 <s-table-row key={r.id}>
                   <s-table-cell>
                     <s-link href={`/app/submissions/${r.id}`}>EMB-{r.number}</s-link>
+                  </s-table-cell>
+                  <s-table-cell>
+                    {STATUS[r.status] ?? r.status}
+                    {r.orderName ? ` · ${r.orderName}` : ""}
                   </s-table-cell>
                   <s-table-cell>{new Date(r.createdAt).toLocaleString()}</s-table-cell>
                   <s-table-cell>

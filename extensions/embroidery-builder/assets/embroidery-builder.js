@@ -21,7 +21,7 @@
     fillPerSqIn: 1800, satinPerSqIn: 1100, runPerIn: 12, perColor: 60, base: 150,
     satinMaxWidthIn: 0.25, uncertainty: 0.2
   };
-  var STEPS = ["Apron & spot", "Upload", "Place & size", "Colors", "Price", "Submit"];
+  var STEPS = ["Apron & spot", "Upload", "Place & size", "Colors", "Price", "Checkout"];
   var PREVIEW_TYPES = /^image\/(png|jpe?g|svg\+xml|webp|gif)$/i;
   var MAX_FILE = 20 * 1024 * 1024;
   var PROC_MAX = 700;
@@ -385,6 +385,7 @@
     window.addEventListener("resize", this.onResize);
     this.bindPointer();
     this.loadVariantImage().then(function () { self.render(); });
+    this.loadConfig();
     this.render();
     this.modal.querySelector(".emb-close").focus();
   };
@@ -397,6 +398,22 @@
     this.modal = null;
     document.body.style.overflow = this.bodyOverflow || "";
     if (this.prevFocus && this.prevFocus.focus) this.prevFocus.focus();
+  };
+
+  // Pricing and estimator constants come from the app server so checkout always matches.
+  Builder.prototype.loadConfig = function () {
+    var self = this;
+    if (!this.cfg.proxyPath) return;
+    fetch(this.cfg.proxyPath + "/config", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !self.modal) return;
+        if (j.pricing) self.pricing = merge(DEFAULT_PRICING, j.pricing);
+        if (j.estimator) { self.est = merge(DEFAULT_EST, j.estimator); self.estKey = null; }
+        self.qty = Math.max(self.qty, self.pricing.minimum || 1);
+        self.render();
+      })
+      .catch(function () { /* keep defaults */ });
   };
 
   Builder.prototype.loadVariantImage = function () {
@@ -806,9 +823,16 @@
     return Object.keys(seen).length;
   };
 
+  Builder.prototype.apronPrice = function () {
+    var v = this.variant;
+    return v && typeof v.price === "number" ? v.price / 100 : null;
+  };
+
   Builder.prototype.quote = function () {
-    var e = this.currentEstimate();
-    return { estimate: e, price: price(this.pricing, this.qty, e.stitches, this.colorCount()) };
+    var e = this.currentEstimate(), pr = price(this.pricing, this.qty, e.stitches, this.colorCount());
+    var ap = this.apronPrice();
+    var aprons = ap == null ? null : ap * this.qty;
+    return { estimate: e, price: pr, aprons: aprons, grand: (aprons || 0) + pr.total };
   };
 
   Builder.prototype.stepPrice = function (p) {
@@ -824,32 +848,34 @@
     qty.addEventListener("change", function () { self.qty = Math.max(1, parseInt(qty.value, 10) || 1); self.render(); });
     p.appendChild(qty);
     if (pr.belowMin) p.appendChild(el("p", { class: "emb-warn" }, "Custom embroidery has a " + this.pricing.minimum + "-apron minimum."));
-    var rows = [
-      [this.qty + " × " + money(pr.tier.price), money(pr.embroidery)],
+    var rows = [];
+    if (q.aprons != null) rows.push([this.qty + " aprons × " + money(this.apronPrice()), money(q.aprons)]);
+    rows = rows.concat([
+      ["Embroidery " + this.qty + " × " + money(pr.tier.price), money(pr.embroidery)],
       ["Extra stitches" + (pr.extraK ? " (" + pr.extraK + "k × " + money(this.pricing.perThousandStitches) + ")" : ""), money(pr.stitchCharge)],
       ["Extra colors" + (pr.extraColors ? " (" + pr.extraColors + ")" : ""), money(pr.colorCharge)],
       ["Setup, one time", money(pr.setup)]
-    ];
+    ]);
     p.appendChild(el("table", { class: "emb-table" }, "<tbody>" + rows.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td></tr>"; }).join("") + "</tbody>"));
-    p.appendChild(el("div", { class: "emb-total" }, "<span>Est. embroidery</span><span>" + money(pr.total) + "</span>"));
-    p.appendChild(el("p", { class: "emb-help" }, "Aprons are priced separately. This is an estimate; the final stitch count and price are confirmed with your proof."));
+    p.appendChild(el("div", { class: "emb-total" }, "<span>Total before tax and shipping</span><span>" + money(q.grand) + "</span>"));
+    p.appendChild(el("p", { class: "emb-help" }, "You'll pay this at checkout. Embroidery is " + money(pr.perApron) + " per apron plus the one-time setup fee. You'll get a digital proof to approve before production."));
   };
 
   Builder.prototype.stepSubmit = function (p) {
     var self = this;
     if (this.done) {
       p.appendChild(el("div", { class: "emb-done" },
-        "<h3>Thanks, we have your design</h3><p class='emb-help'>Reference " + esc(this.done) + ". We'll email your quote and proof within 1–2 business days.</p>"));
+        "<h3>Thanks, we have your design</h3><p class='emb-help'>Reference " + esc(this.done) + ". Taking you to checkout…</p>"));
       return;
     }
     var q = this.quote(), pl = this.getPlace();
-    p.appendChild(el("h3", null, "Review and submit"));
+    p.appendChild(el("h3", null, "Review and check out"));
     var colors = this.logo.palette.map(function (c) { return c.pantone ? c.pantone : c.hex; }).join(", ");
     var spec = [
       ["Apron", (this.cfg.product ? this.cfg.product.title : "") + (this.variant ? " · " + this.variant.title : "")],
       ["Location", this.zone.label], ["Size", pl.w.toFixed(1) + "″ × " + pl.h.toFixed(1) + "″"],
       ["Colors", colors], ["Est. stitches", "≈ " + fmtInt(round100(q.estimate.stitches))],
-      ["Quantity", String(this.qty)], ["Est. embroidery", money(q.price.total)]
+      ["Quantity", String(this.qty)], ["Embroidery + setup", money(q.price.total)], ["Total before tax and shipping", money(q.grand)]
     ];
     p.appendChild(el("table", { class: "emb-spec" }, "<tbody>" + spec.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") + "</tbody>"));
     var fields = [["name", "Name", "text", true], ["email", "Email", "email", true], ["phone", "Phone", "tel", false], ["company", "Company", "text", false]];
@@ -867,16 +893,18 @@
     var chk = el("label", { class: "emb-check" }, '<input type="checkbox"' + (this.rights ? " checked" : "") + '><span>I have the rights to use this logo.</span>');
     chk.querySelector("input").addEventListener("change", function (e) { self.rights = e.target.checked; self.updateSubmit(); });
     p.appendChild(chk);
-    var btn = el("button", { type: "button", class: "emb-primary", "data-submit": "" }, this.submitting ? "Sending…" : "Submit for proof and quote");
+    if (q.price.belowMin) p.appendChild(el("p", { class: "emb-warn" }, "Custom embroidery has a " + this.pricing.minimum + "-apron minimum. Change the quantity on the Price step."));
+    var btn = el("button", { type: "button", class: "emb-primary", "data-submit": "" }, this.submitting ? "Preparing checkout…" : "Continue to checkout");
     btn.addEventListener("click", function () { self.submit(); });
     p.appendChild(btn);
+    p.appendChild(el("p", { class: "emb-help" }, "Your design is saved and attached to your order. Custom items can't be returned."));
     this.updateSubmit();
   };
 
   Builder.prototype.updateSubmit = function () {
     var b = this.panel && this.panel.querySelector("[data-submit]");
     if (!b) return;
-    var ok = this.rights && this.contact.name.trim() && /.+@.+\..+/.test(this.contact.email) && !this.submitting;
+    var ok = this.rights && this.contact.name.trim() && /.+@.+\..+/.test(this.contact.email) && !this.submitting && this.qty >= (this.pricing.minimum || 1);
     b.disabled = !ok;
   };
 
@@ -923,6 +951,7 @@
       return res.json().catch(function () { return {}; }).then(function (j) {
         if (!res.ok || !j.ok) throw new Error(j.error || "We couldn't send your design. Please try again.");
         self.done = j.reference || j.id || "received";
+        if (j.checkoutUrl) window.location.href = j.checkoutUrl;
       });
     }).catch(function (e) {
       self.error = e.message || "We couldn't send your design. Please try again.";

@@ -20,7 +20,7 @@ Built on Shopify's React Router app template. Hosted on Railway (`embuild-app` +
 | `SHOPIFY_API_KEY` | app's Client ID (Dev Dashboard → app → Settings) |
 | `SHOPIFY_API_SECRET` | app's Client secret |
 | `SHOPIFY_APP_URL` | `https://embuild-app-production.up.railway.app` |
-| `SCOPES` | `read_products,write_files,write_metaobject_definitions,write_metaobjects` |
+| `SCOPES` | `read_products,write_files,write_metaobject_definitions,write_metaobjects,write_draft_orders` |
 
 The app does not start without `SHOPIFY_API_KEY`. Until these are set, Railway keeps the previous deploy running because the `/health` check fails.
 

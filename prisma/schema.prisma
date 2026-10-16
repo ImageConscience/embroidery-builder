@@ -55,6 +55,8 @@ model Submission {
   logoType      String
   logoFileId    String?
   mockupFileId  String?
+  draftOrderId  String?
+  checkoutUrl   String?
   // Fallback copies when Shopify Files upload fails, so nothing a customer sends is lost.
   logoData      Bytes?
   mockupData    Bytes?
