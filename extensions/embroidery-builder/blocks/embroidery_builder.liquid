@@ -1,0 +1,89 @@
+{%- comment -%}
+  Embroidery builder app block. Add it to the product template in the theme editor.
+  Zones and pricing come from the block settings for the MVP; the admin zone editor replaces the zones setting later.
+{%- endcomment -%}
+{%- liquid
+  assign first_variant = product.selected_or_first_available_variant
+  assign main_image = first_variant.featured_image | default: product.featured_image
+-%}
+{%- if product and main_image -%}
+  <div class="emb-root" data-emb-root id="emb-{{ block.id }}" {{ block.shopify_attributes }}>
+    <button type="button" class="emb-open" data-emb-open
+      style="--emb-accent: {{ block.settings.accent_color }};">
+      {{ block.settings.button_label | default: 'Customize with your logo' | escape }}
+    </button>
+    <script type="application/json" data-emb-config>
+      {
+        "proxyPath": "/apps/embroidery",
+        "shop": {{ shop.permanent_domain | json }},
+        "product": {
+          "id": {{ product.id | json }},
+          "handle": {{ product.handle | json }},
+          "title": {{ product.title | json }},
+          "vendor": {{ product.vendor | json }},
+          "url": {{ product.url | json }}
+        },
+        "variants": [
+          {%- for v in product.variants -%}
+            {%- assign vimg = v.featured_image | default: main_image -%}
+            {
+              "id": {{ v.id | json }},
+              "title": {{ v.title | json }},
+              "image": {{ vimg | image_url: width: 1400 | json }},
+              "available": {{ v.available | json }}
+            }{%- unless forloop.last -%},{%- endunless -%}
+          {%- endfor -%}
+        ],
+        "selectedVariantId": {{ first_variant.id | json }},
+        "zones": {{ block.settings.zones_json | default: '[]' }},
+        "pricing": {{ block.settings.pricing_json | default: '{}' }},
+        "estimator": {{ block.settings.estimator_json | default: '{}' }},
+        "accent": {{ block.settings.accent_color | json }}
+      }
+    </script>
+  </div>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Embroidery builder",
+  "target": "section",
+  "javascript": "embroidery-builder.js",
+  "stylesheet": "embroidery-builder.css",
+  "settings": [
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Button label",
+      "default": "Customize with your logo"
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#B44A31"
+    },
+    {
+      "type": "textarea",
+      "id": "zones_json",
+      "label": "Embroidery locations (JSON)",
+      "info": "x, y, w, h are fractions of the product photo. widthIn is the real width of that box in inches. maxW and maxH are the largest logo allowed, in inches.",
+      "default": "[{\"id\":\"chest\",\"label\":\"Chest\",\"x\":0.38,\"y\":0.16,\"w\":0.24,\"h\":0.2,\"widthIn\":5,\"maxW\":4,\"maxH\":4},{\"id\":\"left-pocket\",\"label\":\"Left pocket\",\"x\":0.22,\"y\":0.62,\"w\":0.2,\"h\":0.14,\"widthIn\":5,\"maxW\":3.5,\"maxH\":2.5,\"daystarOnly\":true},{\"id\":\"right-pocket\",\"label\":\"Right pocket\",\"x\":0.58,\"y\":0.62,\"w\":0.2,\"h\":0.14,\"widthIn\":5,\"maxW\":3.5,\"maxH\":2.5,\"daystarOnly\":true}]"
+    },
+    {
+      "type": "textarea",
+      "id": "pricing_json",
+      "label": "Pricing (JSON)",
+      "info": "Quantity tiers and extras. Defaults match the Standard Embroidery table.",
+      "default": "{\"minimum\":50,\"tiers\":[{\"min\":50,\"price\":8.95},{\"min\":72,\"price\":7.95},{\"min\":144,\"price\":6.95},{\"min\":300,\"price\":5.95}],\"includedStitches\":6000,\"perThousandStitches\":1,\"includedColors\":4,\"perExtraColor\":1,\"setupFee\":35}"
+    },
+    {
+      "type": "textarea",
+      "id": "estimator_json",
+      "label": "Stitch estimator constants (JSON)",
+      "info": "Starter values. Tuned later from past jobs with known stitch counts.",
+      "default": "{\"fillPerSqIn\":1800,\"satinPerSqIn\":1100,\"runPerIn\":12,\"perColor\":60,\"base\":150,\"satinMaxWidthIn\":0.25,\"uncertainty\":0.2}"
+    }
+  ]
+}
+{% endschema %}

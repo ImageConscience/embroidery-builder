@@ -32,3 +32,33 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+// A customer's embroidery design submitted from the storefront builder.
+model Submission {
+  id            String   @id @default(cuid())
+  number        Int      @default(autoincrement())
+  shop          String
+  createdAt     DateTime @default(now())
+  status        String   @default("new")
+  customerName  String
+  email         String
+  phone         String?
+  company       String?
+  notes         String?
+  productTitle  String?
+  variantTitle  String?
+  zoneLabel     String?
+  quantity      Int
+  estTotal      Float?
+  spec          Json
+  logoName      String
+  logoType      String
+  logoFileId    String?
+  mockupFileId  String?
+  // Fallback copies when Shopify Files upload fails, so nothing a customer sends is lost.
+  logoData      Bytes?
+  mockupData    Bytes?
+
+  @@index([shop, createdAt])
+  @@unique([number])
+}

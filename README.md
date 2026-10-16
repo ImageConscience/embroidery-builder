@@ -24,12 +24,21 @@ Built on Shopify's React Router app template. Hosted on Railway (`embuild-app` +
 
 The app does not start without `SHOPIFY_API_KEY`. Until these are set, Railway keeps the previous deploy running because the `/health` check fails.
 
+## What's in the MVP
+
+- **Theme block "Embroidery builder"** (`extensions/embroidery-builder`): adds a "Customize with your logo" button to product pages. Steps: apron color and location, upload (PNG/JPG/SVG preview; background removed), place and size within the location's limits, colors (suggested hex, optional Pantone), live stitch and price estimate, review and submit.
+- **Submissions** (`/proxy/submit`): saves the design, uploads the original logo and the mockup to Shopify Files, and returns a reference like `EMB-1001`.
+- **Admin**: Submissions list and detail page (mockup, specs, colors, customer, original logo download).
+
+Locations, pricing and estimator constants are JSON settings on the theme block for now. Location x/y/w/h are fractions of the product photo; `widthIn` is the real width of that box in inches.
+
 ## Endpoints
 
 - `/health`: Railway health check
 - `/app`: admin screens (inside Shopify admin)
 - `/proxy/*`: storefront requests, reached at `https://<shop>/apps/embroidery/*`
 - `/proxy/ping`: confirms the app proxy is wired up
+- `/proxy/submit`: storefront design submission (multipart POST)
 
 ## Notes
 
