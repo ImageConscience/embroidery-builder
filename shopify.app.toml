@@ -1,6 +1,6 @@
 # Shopify app configuration for the ApronWarehouse embroidery builder.
-# client_id is filled in by `shopify app config link` (run once on Lee's PC).
-client_id = ""
+# App: Embroidery Builder (Dev Dashboard)
+client_id = "6e5e33dbe1fcdb8aec8f7b4cbe8b13ca"
 name = "Embroidery Builder"
 application_url = "https://embuild-app-production.up.railway.app"
 embedded = true
