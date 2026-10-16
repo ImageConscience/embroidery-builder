@@ -1,0 +1,40 @@
+# Shopify app configuration for the ApronWarehouse embroidery builder.
+# client_id is filled in by `shopify app config link` (run once on Lee's PC).
+client_id = ""
+name = "Embroidery Builder"
+application_url = "https://embuild-app-production.up.railway.app"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[access_scopes]
+# read_products: product photos and handles for zone templates
+# write_files: store uploaded logos and composed mockups in Shopify Files
+# write_metaobjects / write_metaobject_definitions: zone templates and builder settings
+scopes = "read_products,write_files,write_metaobject_definitions,write_metaobjects"
+
+[auth]
+redirect_urls = [
+  "https://embuild-app-production.up.railway.app/auth/callback",
+  "https://embuild-app-production.up.railway.app/auth/shopify/callback",
+  "https://embuild-app-production.up.railway.app/api/auth/callback"
+]
+
+# Storefront requests from the builder go through the shop's domain:
+# https://<shop>/apps/embroidery/...  ->  https://embuild-app-production.up.railway.app/proxy/...
+[app_proxy]
+url = "https://embuild-app-production.up.railway.app/proxy"
+subpath = "embroidery"
+prefix = "apps"
+
+[webhooks]
+api_version = "2026-10"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = ["app/uninstalled"]
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
