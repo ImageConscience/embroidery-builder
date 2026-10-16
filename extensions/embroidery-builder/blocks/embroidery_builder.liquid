@@ -36,8 +36,8 @@
         ],
         "selectedVariantId": {{ first_variant.id | json }},
         "zones": {{ block.settings.zones_json | default: '[]' }},
-        "pricing": {{ block.settings.pricing_json | default: '{}' }},
-        "estimator": {{ block.settings.estimator_json | default: '{}' }},
+        "pricing": {{ block.settings.pricing_json | default: 'null' }},
+        "estimator": {{ block.settings.estimator_json | default: 'null' }},
         "accent": {{ block.settings.accent_color | json }}
       }
     </script>
