@@ -60,7 +60,36 @@ model Submission {
   // Fallback copies when Shopify Files upload fails, so nothing a customer sends is lost.
   logoData      Bytes?
   mockupData    Bytes?
+  // Design center
+  stage         String    @default("new") // new, in_review, proof_sent, changes_requested, approved, in_production, done, cancelled
+  attention     Boolean   @default(false) // customer wrote or responded and nobody has replied yet
+  token         String?   @unique // secret for the customer's design page link
+  updatedAt     DateTime  @default(now()) @updatedAt
+  artworkFileId String? // clean flat-color version of the logo as shown in the builder
+  artworkData   Bytes?
+  proofFileId   String?
+  proofData     Bytes?
+  proofType     String?
+  proofName     String?
+  proofSentAt   DateTime?
+  approvedAt    DateTime?
+  messages      Message[]
 
   @@index([shop, createdAt])
+  @@index([shop, stage])
   @@unique([number])
+}
+
+// Timeline of a design: messages with the customer, internal notes and status events.
+model Message {
+  id           String     @id @default(cuid())
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  kind         String     @default("message") // message (customer can see), note (internal), event
+  author       String // staff, customer, system
+  authorName   String?
+  body         String
+
+  @@index([submissionId, createdAt])
 }

@@ -12,6 +12,7 @@ export type CheckoutInput = {
   stitches: number;
   perApron: number;
   setupFee: number;
+  designUrl?: string;
 };
 
 // Create a draft order (aprons + embroidery + setup) and return its checkout link.
@@ -54,6 +55,7 @@ export async function createCheckout(admin: AdminLike, c: CheckoutInput) {
                 { key: "Size", value: c.sizeLabel },
                 { key: "Colors", value: c.colorsLabel.slice(0, 250) },
                 { key: "Est. stitches", value: String(Math.round(c.stitches)) },
+                ...(c.designUrl ? [{ key: "Your design and proof", value: c.designUrl }] : []),
               ],
             },
             {

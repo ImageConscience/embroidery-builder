@@ -9,11 +9,11 @@ embedded = true
 automatically_update_urls_on_dev = false
 
 [access_scopes]
-# read_products: product photos and handles for zone templates
+# write_products: read product photos and assign location templates (product metafield)
 # write_files: store uploaded logos and composed mockups in Shopify Files
 # write_metaobjects / write_metaobject_definitions: zone templates and builder settings
 # write_draft_orders: create the checkout for each design
-scopes = "read_products,write_files,write_metaobject_definitions,write_metaobjects,write_draft_orders"
+scopes = "write_products,write_files,write_metaobject_definitions,write_metaobjects,write_draft_orders"
 
 [auth]
 redirect_urls = [

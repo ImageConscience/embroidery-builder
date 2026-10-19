@@ -24,13 +24,13 @@ Built on Shopify's React Router app template. Hosted on Railway (`embuild-app` +
 
 The app does not start without `SHOPIFY_API_KEY`. Until these are set, Railway keeps the previous deploy running because the `/health` check fails.
 
-## What's in the MVP
+## What's built
 
-- **Theme block "Embroidery builder"** (`extensions/embroidery-builder`): adds a "Customize with your logo" button to product pages. Steps: apron color and location, upload (PNG/JPG/SVG preview; background removed), place and size within the location's limits, colors (suggested hex, optional Pantone), live stitch and price estimate, review and submit.
-- **Submissions** (`/proxy/submit`): saves the design, uploads the original logo and the mockup to Shopify Files, and returns a reference like `EMB-1001`.
-- **Admin**: Submissions list and detail page (mockup, specs, colors, customer, original logo download).
-
-Locations, pricing and estimator constants are JSON settings on the theme block for now. Location x/y/w/h are fractions of the product photo; `widthIn` is the real width of that box in inches.
+- **Theme block "Embroidery builder"** (`extensions/embroidery-builder`): adds a "Customize with your logo" button to product pages that have a location template. Steps: apron color and location, upload (PNG/JPG/SVG preview; a plain background can be removed or kept as part of the design), place and size within the location's limits, colors (suggested hex, optional Pantone), live stitch and price estimate, review and checkout.
+- **Checkout** (`/proxy/submit`): saves the design (original logo, flat-color artwork, mockup to Shopify Files), prices it on the server and sends the customer to a draft-order checkout: apron line, embroidery line, setup line. The embroidery line carries a link to the customer's design page.
+- **Location templates** (admin > Location templates): draw locations on a reference product photo, set the scale with a measuring line, and apply the template to products by picking them, by collection, product type, vendor or tag. Templates are Shopify metaobjects (`embroidery_location_template`); products point to one with the product metafield `embroidery.location_template`, so other tools (bulk editor, Matrixify, CSV) can assign them too. One template covers every product photographed with the same framing.
+- **Design center** (admin home): every design with its mockup, stage (New, In review, Proof sent, Changes requested, Approved, In production, Done, Cancelled), payment status and a "Needs reply" flag. The design page shows the mockup, artwork, proof, specs, thread colors, the stitch estimate breakdown and price, a conversation with internal notes, proof upload, the customer link, and a production package (.zip with original logo, artwork, mockup, proof, printable spec sheet and spec JSON).
+- **Customer design page** (`https://<shop>/apps/embroidery/design/<token>`, rendered in the store theme): the customer sees the mockup or proof, approves it or asks for changes, and messages the team. No emails are sent; staff copy the link from the design page.
 
 ## Endpoints
 
@@ -39,6 +39,8 @@ Locations, pricing and estimator constants are JSON settings on the theme block 
 - `/proxy/*`: storefront requests, reached at `https://<shop>/apps/embroidery/*`
 - `/proxy/ping`: confirms the app proxy is wired up
 - `/proxy/submit`: storefront design submission (multipart POST)
+- `/proxy/design/<token>`: the customer's design page (Liquid, through the app proxy)
+- `/files/<id>/<kind>`: signed links to design files and the production package
 
 ## Notes
 

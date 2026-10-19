@@ -243,7 +243,14 @@
         var cx = cv.getContext("2d", { willReadFrequently: true });
         cx.drawImage(img, 0, 0, w, h);
         var data = cx.getImageData(0, 0, w, h);
-        var bgInfo = removeBackground(data, w, h, !!opts.keepEnclosed);
+        var thumbKept = cv.toDataURL("image/png");
+        // Find a plain background on a copy, so the customer can choose to remove it or keep it.
+        var probe = new ImageData(new Uint8ClampedArray(data.data), w, h);
+        var bgInfo = removeBackground(probe, w, h, !!opts.keepEnclosed);
+        var thumbRemoved = null;
+        if (bgInfo) { cx.putImageData(probe, 0, 0); thumbRemoved = cv.toDataURL("image/png"); }
+        var keepBg = !!(opts.keepBackground && bgInfo);
+        if (bgInfo && !keepBg) data = probe;
         var q = quantize(data, w, h);
         if (!q.opaque) { URL.revokeObjectURL(url); reject(new Error("That image looks empty after removing the background.")); return; }
 
@@ -270,8 +277,9 @@
         URL.revokeObjectURL(url);
         resolve({
           file: file, w: tw, h: th, labels: labels, alpha: alpha, mask: mask, dist: dist, edges: edges,
-          opaque: q.opaque, palette: q.palette, bgRemoved: !!bgInfo, bg: bgInfo && bgInfo.bg,
-          enclosed: bgInfo ? bgInfo.enclosed : 0, keepEnclosed: !!opts.keepEnclosed, thumb: thumb,
+          opaque: q.opaque, palette: q.palette, bgDetected: !!bgInfo, bgRemoved: !!bgInfo && !keepBg, bgKept: keepBg,
+          bg: bgInfo && bgInfo.bg, enclosed: bgInfo && !keepBg ? bgInfo.enclosed : 0, keepEnclosed: !!opts.keepEnclosed,
+          thumb: thumb, thumbKept: thumbKept, thumbRemoved: thumbRemoved,
           naturalW: nw, naturalH: nh, lowRes: !/svg/i.test(file.type) && Math.max(nw, nh) < 500
         });
       }).catch(function (e) { URL.revokeObjectURL(url); reject(e); });
@@ -279,7 +287,7 @@
   }
 
   // Recolor the logo with the current palette and add a faint thread texture.
-  function renderLogo(logo) {
+  function renderLogo(logo, plain) {
     var cv = document.createElement("canvas"); cv.width = logo.w; cv.height = logo.h;
     var cx = cv.getContext("2d"), img = cx.createImageData(logo.w, logo.h), p = img.data;
     var cols = logo.palette.map(function (c) { return hexToRgb(c.hex) || hexToRgb(c.detected); });
@@ -289,6 +297,7 @@
       p[o] = c[0]; p[o + 1] = c[1]; p[o + 2] = c[2]; p[o + 3] = logo.alpha[i];
     }
     cx.putImageData(img, 0, 0);
+    if (plain) return cv; // flat colors only: the artwork file sent with the design
     cx.globalCompositeOperation = "source-atop";
     cx.lineWidth = Math.max(1, logo.w / 300);
     cx.strokeStyle = "rgba(255,255,255,0.10)";
@@ -334,12 +343,24 @@
 
   /* ---------- builder UI ---------- */
 
+  // Locations from a location template: boxes are fractions of the photo, and the template knows
+  // how many inches wide the whole photo is, so each box's real width is w × photoWidthIn.
+  function templateZones(t) {
+    if (!t || typeof t !== "object") return null;
+    var pw = parseFloat(t.photoWidthIn), zones = t.zones;
+    if (typeof zones === "string") { try { zones = JSON.parse(zones); } catch (e) { zones = null; } }
+    if (!(pw > 0) || !Array.isArray(zones) || !zones.length) return null;
+    return zones.map(function (z) {
+      return { id: z.id, label: z.label, x: +z.x, y: +z.y, w: +z.w, h: +z.h, widthIn: +z.w * pw, maxW: +z.maxW || 0, maxH: +z.maxH || 0, minW: +z.minW || 0 };
+    });
+  }
+
   function Builder(cfg) {
     this.cfg = cfg;
     this.pricing = merge(DEFAULT_PRICING, cfg.pricing);
     this.est = merge(DEFAULT_EST, cfg.estimator);
     var vendor = String((cfg.product && cfg.product.vendor) || "");
-    this.zones = (Array.isArray(cfg.zones) ? cfg.zones : []).filter(function (z) {
+    this.zones = templateZones(cfg.template) || (Array.isArray(cfg.zones) ? cfg.zones : []).filter(function (z) {
       return !z.daystarOnly || /daystar/i.test(vendor);
     });
     var vs = cfg.variants || [];
@@ -468,11 +489,12 @@
     if (!this.logo || !z) return null;
     var p = this.place[z.id], zi = this.zoneInches(z), maxW = this.maxLogoWidth(z);
     if (!p) { var w0 = Math.min(maxW, maxW * 0.8); p = this.place[z.id] = { cx: zi.w / 2, cy: zi.h / 2, w: w0 }; }
-    p.w = clamp(p.w, Math.min(0.5, maxW), maxW);
+    var minW = Math.min(maxW, Math.max(0.5, z.minW || 0));
+    p.w = clamp(p.w, minW, maxW);
     var h = p.w * this.logo.h / this.logo.w;
     p.cx = clamp(p.cx, p.w / 2, zi.w - p.w / 2);
     p.cy = clamp(p.cy, h / 2, zi.h - h / 2);
-    return { cx: p.cx, cy: p.cy, w: p.w, h: h, maxW: maxW, zi: zi };
+    return { cx: p.cx, cy: p.cy, w: p.w, h: h, maxW: maxW, minW: minW, zi: zi };
   };
 
   Builder.prototype.draw = function (target) {
@@ -676,21 +698,46 @@
     if (this.logo) {
       var L = this.logo, badges = "";
       if (L.bgRemoved) badges += '<span class="emb-badge">Background removed</span>';
+      if (L.bgKept) badges += '<span class="emb-badge">Background kept</span>';
       if (!L.lowRes) badges += '<span class="emb-badge">Resolution OK</span>';
       p.appendChild(el("div", { class: "emb-file" },
         '<img alt="" src="' + L.thumb + '"><div><p><strong>' + esc(L.file.name) + '</strong></p>' +
         '<p class="emb-help">' + L.naturalW + " × " + L.naturalH + " px · " + L.palette.length + " color" + (L.palette.length === 1 ? "" : "s") + " detected</p>" + badges + "</div>"));
+      if (L.bgDetected) this.backgroundChoice(p);
       if (L.bgRemoved && (L.enclosed > L.opaque * 0.005 || L.keepEnclosed)) {
         var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : rgbToHex(L.bg);
         var keep = el("label", { class: "emb-check" }, '<input type="checkbox"' + (L.keepEnclosed ? " checked" : "") + '><span>Stitch the ' + esc(bgName) +
           " areas inside my logo. Leave this off if those areas should show the apron fabric.</span>");
-        keep.querySelector("input").addEventListener("change", function (e) { self.handleFile(L.file, { keepEnclosed: e.target.checked, keepPlace: true }); });
+        keep.querySelector("input").addEventListener("change", function (e) { self.handleFile(L.file, { keepEnclosed: e.target.checked, keepBackground: L.bgKept, keepPlace: true }); });
         p.appendChild(keep);
       }
       if (L.lowRes) p.appendChild(el("p", { class: "emb-warn" }, "This file is small, so fine details may be hard to judge. A larger file or a vector (SVG, AI, EPS, PDF) works best."));
       if (L.palette.length > 6) p.appendChild(el("p", { class: "emb-warn" }, "This logo has a lot of colors. Embroidery works best with fewer flat colors; you can merge them on the Colors step."));
     }
     p.appendChild(el("p", { class: "emb-help" }, "We keep your original file exactly as uploaded for production."));
+  };
+
+  // Remove the plain background (default) or keep it as part of the design.
+  Builder.prototype.backgroundChoice = function (p) {
+    var self = this, L = this.logo;
+    var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : rgbToHex(L.bg);
+    var box = el("fieldset", { class: "emb-bgchoice" }, "<legend class='emb-label'>Your logo has a plain " + esc(bgName) + " background</legend>");
+    [
+      { keep: false, title: "Remove the background", text: "Only the logo is stitched. The apron shows around it.", img: L.thumbRemoved },
+      { keep: true, title: "Keep the background", text: "The background is stitched as a solid block. Choose this if it's part of your design.", img: L.thumbKept }
+    ].forEach(function (o) {
+      var on = o.keep === L.bgKept;
+      var lab = el("label", { class: "emb-bgopt" + (on ? " is-on" : "") },
+        '<input type="radio" name="emb-bg" class="emb-sr"' + (on ? " checked" : "") + '>' +
+        '<span class="emb-bgimg"><img alt="" src="' + o.img + '"></span>' +
+        '<span><strong>' + esc(o.title) + '</strong><span class="emb-help">' + esc(o.text) + '</span></span>');
+      lab.querySelector("input").addEventListener("change", function () {
+        if (o.keep !== L.bgKept) self.handleFile(L.file, { keepBackground: o.keep, keepEnclosed: L.keepEnclosed });
+      });
+      box.appendChild(lab);
+    });
+    p.appendChild(box);
+    if (L.bgKept) p.appendChild(el("p", { class: "emb-warn" }, "A stitched background is a large filled area, so it adds stitches and counts as a thread color. You'll see the effect on the price step."));
   };
 
   Builder.prototype.handleFile = function (file, opts) {
@@ -728,7 +775,7 @@
     });
     p.appendChild(chips);
     p.appendChild(el("p", { class: "emb-label" }, "Logo size"));
-    var range = el("input", { type: "range", class: "emb-range", min: "0.5", max: String(pl.maxW.toFixed(2)), step: "0.05", value: String(pl.w), "aria-label": "Logo width in inches", "data-range": "" });
+    var range = el("input", { type: "range", class: "emb-range", min: String(pl.minW.toFixed(2)), max: String(pl.maxW.toFixed(2)), step: "0.05", value: String(pl.w), "aria-label": "Logo width in inches", "data-range": "" });
     range.addEventListener("input", function () { self.place[self.zone.id].w = parseFloat(range.value); self.scheduleUpdate(); });
     p.appendChild(range);
     p.appendChild(el("p", { class: "emb-size", "data-size": "" }, pl.w.toFixed(1) + "″ × " + pl.h.toFixed(1) + "″"));
@@ -928,7 +975,9 @@
       estimate: { stitches: Math.round(q.estimate.stitches), low: Math.round(q.estimate.low), high: Math.round(q.estimate.high), fillSqIn: +q.estimate.fillSqIn.toFixed(2), satinSqIn: +q.estimate.satinSqIn.toFixed(2), outlineIn: +q.estimate.outlineIn.toFixed(1) },
       quantity: this.qty,
       price: { perApron: q.price.perApron, tierPrice: q.price.tier.price, setupFee: q.price.setup, total: +q.price.total.toFixed(2), belowMinimum: q.price.belowMin },
-      logoFile: { name: this.logo.file.name, type: this.logo.file.type, size: this.logo.file.size }
+      logoFile: { name: this.logo.file.name, type: this.logo.file.type, size: this.logo.file.size },
+      background: this.logo.bgKept ? "kept" : this.logo.bgRemoved ? "removed" : "none",
+      insideAreasStitched: !!(this.logo.bgRemoved && this.logo.keepEnclosed)
     };
   };
 
@@ -940,6 +989,10 @@
       var fd = new FormData();
       fd.append("logo", self.logo.file, self.logo.file.name);
       if (mock) fd.append("mockup", mock, "mockup.png");
+      return new Promise(function (resolve) {
+        try { renderLogo(self.logo, true).toBlob(function (b) { resolve(b); }, "image/png"); } catch (e) { resolve(null); }
+      }).then(function (art) { if (art) fd.append("artwork", art, "artwork.png"); return fd; });
+    }).then(function (fd) {
       fd.append("spec", JSON.stringify(self.specData()));
       Object.keys(self.contact).forEach(function (k) { fd.append(k, self.contact[k]); });
       fd.append("rights", self.rights ? "yes" : "no");

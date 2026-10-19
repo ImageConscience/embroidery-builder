@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { uploadToShopifyFiles } from "../lib/files.server";
 import { createCheckout } from "../lib/checkout.server";
 import { PRICING, priceEmbroidery } from "../lib/pricing.server";
+import { addEvent, customerLink, newToken } from "../lib/design.server";
 
 // Storefront submission: POST https://<shop>/apps/embroidery/submit (multipart form).
 // Saves the design, then creates a draft order priced on the server and returns its checkout link.
@@ -36,6 +37,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const logo = form.get("logo");
   const mockup = form.get("mockup");
+  const artwork = form.get("artwork");
   const name = str(form.get("name"), 200);
   const email = str(form.get("email"), 200);
   if (!(logo instanceof File) || logo.size === 0) return bad("Please upload your logo.");
@@ -63,6 +65,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     mockup instanceof File && mockup.size > 0 && mockup.size <= MAX_MOCKUP
       ? new Uint8Array(await mockup.arrayBuffer())
       : null;
+  const artworkBytes =
+    artwork instanceof File && artwork.size > 0 && artwork.size <= MAX_MOCKUP
+      ? new Uint8Array(await artwork.arrayBuffer())
+      : null;
+  const token = newToken();
 
   const sub = await prisma.submission.create({
     data: {
@@ -80,9 +87,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       spec,
       logoName: logo.name.slice(0, 200),
       logoType: logo.type || "application/octet-stream",
+      token,
     },
   });
   const ref = `EMB-${sub.number}`;
+  const designUrl = customerLink(session.shop, token);
+  await addEvent(sub.id, `Design submitted from the product page (${spec?.product?.title ?? "apron"}).`, "customer").catch(() => {});
 
   // Files go to Shopify Files; if that fails, keep the bytes in the database instead.
   const update: Record<string, unknown> = {};
@@ -109,6 +119,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         update.mockupData = Buffer.from(mockupBytes);
       }
     }
+    if (artworkBytes) {
+      try {
+        update.artworkFileId = await uploadToShopifyFiles(
+          admin,
+          { name: `${ref}-artwork.png`, type: "image/png", bytes: artworkBytes },
+          `${ref} artwork`,
+        );
+      } catch (e) {
+        console.error(`[${ref}] artwork upload failed`, e);
+        update.artworkData = Buffer.from(artworkBytes);
+      }
+    }
   }
 
   let checkoutUrl: string;
@@ -129,6 +151,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       stitches,
       perApron: price.perApron,
       setupFee: price.setupFee,
+      designUrl,
     });
     update.draftOrderId = co.draftOrderId;
     update.checkoutUrl = co.checkoutUrl;
@@ -142,5 +165,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   await prisma.submission.update({ where: { id: sub.id }, data: update });
 
-  return Response.json({ ok: true, reference: ref, checkoutUrl });
+  return Response.json({ ok: true, reference: ref, checkoutUrl, designUrl });
 };

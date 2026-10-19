@@ -18,7 +18,8 @@ export default function App() {
   return (
     <AppProvider apiKey={apiKey}>
       <s-app-nav>
-        <s-link href="/app">Submissions</s-link>
+        <s-link href="/app">Design center</s-link>
+        <s-link href="/app/templates">Location templates</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>

@@ -1,13 +1,25 @@
 {%- comment -%}
   Embroidery builder app block. Add it to the product template in the theme editor.
-  Locations come from the block setting for now (the admin zone editor replaces it later).
+  Locations come from the product's location template (product metafield embroidery.location_template,
+  managed in the app under Location templates). The JSON setting is only a fallback for products without one.
   Pricing comes from the app server (/apps/embroidery/config) so checkout and the builder always match.
 {%- endcomment -%}
 {%- liquid
   assign first_variant = product.selected_or_first_available_variant
   assign main_image = first_variant.featured_image | default: product.featured_image
+  assign tpl = product.metafields.embroidery.location_template.value
+  assign use_fallback = false
+  if tpl == blank and block.settings.use_fallback and block.settings.zones_json != blank
+    assign use_fallback = true
+  endif
+  assign show_builder = false
+  if product and main_image
+    if tpl != blank or use_fallback
+      assign show_builder = true
+    endif
+  endif
 -%}
-{%- if product and main_image -%}
+{%- if show_builder -%}
   <div class="emb-root" data-emb-root id="emb-{{ block.id }}" {{ block.shopify_attributes }}>
     <button type="button" class="emb-open" data-emb-open
       style="--emb-accent: {{ block.settings.accent_color }};">
@@ -37,12 +49,23 @@
           {%- endfor -%}
         ],
         "selectedVariantId": {{ first_variant.id | json }},
-        "zones": {{ block.settings.zones_json | default: '[]' }},
+        "template": {%- if tpl != blank -%}{
+          "name": {{ tpl.name.value | json }},
+          "photoWidthIn": {{ tpl.photo_width_in.value | json }},
+          "photoRatio": {{ tpl.photo_ratio.value | json }},
+          "zones": {{ tpl.zones.value | json }}
+        }{%- else -%}null{%- endif -%},
+        "zones": {%- if use_fallback -%}{{ block.settings.zones_json }}{%- else -%}[]{%- endif -%},
         "currency": {{ cart.currency.iso_code | json }},
         "accent": {{ block.settings.accent_color | json }}
       }
     </script>
   </div>
+{%- elsif request.design_mode and product -%}
+  <p style="padding:8px 12px;border:1px dashed #b44a31;border-radius:8px;font-size:13px">
+    Embroidery builder: this product has no location template, so customers won't see the builder here.
+    Assign one in the Embroidery Builder app under Location templates.
+  </p>
 {%- endif -%}
 
 {% schema %}
@@ -65,9 +88,20 @@
       "default": "#B44A31"
     },
     {
+      "type": "header",
+      "content": "Products without a location template"
+    },
+    {
+      "type": "checkbox",
+      "id": "use_fallback",
+      "label": "Show the builder using the locations below",
+      "info": "Off: the builder only appears on products with a location template (set in the app under Location templates).",
+      "default": false
+    },
+    {
       "type": "textarea",
       "id": "zones_json",
-      "label": "Embroidery locations (JSON)",
+      "label": "Fallback locations (JSON)",
       "info": "x, y, w, h are fractions of the product photo. widthIn is the real width of that box in inches. maxW and maxH are the largest logo allowed, in inches.",
       "default": "[{\"id\":\"chest\",\"label\":\"Chest\",\"x\":0.38,\"y\":0.16,\"w\":0.24,\"h\":0.2,\"widthIn\":5,\"maxW\":4,\"maxH\":4},{\"id\":\"left-pocket\",\"label\":\"Left pocket\",\"x\":0.22,\"y\":0.62,\"w\":0.2,\"h\":0.14,\"widthIn\":5,\"maxW\":3.5,\"maxH\":2.5,\"daystarOnly\":true},{\"id\":\"right-pocket\",\"label\":\"Right pocket\",\"x\":0.58,\"y\":0.62,\"w\":0.2,\"h\":0.14,\"widthIn\":5,\"maxW\":3.5,\"maxH\":2.5,\"daystarOnly\":true}]"
     }

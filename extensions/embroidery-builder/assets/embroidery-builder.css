@@ -60,3 +60,10 @@
 .emb-spec td:last-child{text-align:right;font-weight:700}
 .emb-done{padding:40px 24px;text-align:center}
 .emb-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.emb-bgchoice{border:0;margin:12px 0;padding:0;display:grid;gap:8px}
+.emb-bgopt{display:flex;gap:12px;align-items:center;padding:10px;border:2px solid #DDD5C6;border-radius:10px;cursor:pointer;background:#fff}
+.emb-bgopt.is-on{border-color:var(--emb-accent,#B44A31);background:#FFF8F4}
+.emb-bgopt:focus-within{outline:2px solid var(--emb-accent,#B44A31);outline-offset:2px}
+.emb-bgopt strong{display:block}
+.emb-bgimg{flex:0 0 72px;height:72px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:repeating-conic-gradient(#d9d4cb 0 25%,#f4f1ea 0 50%) 50%/14px 14px}
+.emb-bgimg img{max-width:68px;max-height:68px}

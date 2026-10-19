@@ -10,6 +10,13 @@
 - Order lines carry the design reference (EMB-####), location, size, colors and estimated stitches
 - Admin shows checkout started / paid with the order number
 
+## Shipped: design center and templates (Oct 19)
+- Background choice in the builder: remove a plain background or keep it as part of the design (kept backgrounds are counted in stitches and colors)
+- Location templates: admin editor (reference photo, measuring line for scale, draw/resize locations, max/min logo size), stored as metaobjects and assigned with the product metafield `embroidery.location_template`; bulk apply by products, collection, product type, vendor or tag; warns when a product photo is framed differently
+- Design center: gallery with stages and "Needs reply", design page with mockup/artwork/proof, specs, stitch breakdown, price, conversation and internal notes, proof upload, production package (.zip)
+- Customer design page through the app proxy: view proof, approve, request changes, message the team; link on the order confirmation
+- Payment stays at checkout; proof approval comes after payment and before production
+
 ## Checkout follow-ups
 - Server-side stitch recount from the uploaded logo (today the server trusts the builder's estimate; price tiers and fees are server-side)
 - Apply ApronWarehouse's apron volume discounts inside the embroidery checkout
@@ -25,13 +32,10 @@
 - Customer account page (customer account UI extension) listing the customer's designs and orders
 - Saved logos: reuse a logo on a new apron without re-uploading
 - Reorder a past design in one click
-- Proof approval: view the digital proof, approve or request changes
-- Message thread per design/order between customer and the ApronWarehouse team (with email notifications both ways)
-- Admin side: proof upload, status changes (received → proof sent → approved → in production → shipped), replies
+- Email notifications for proofs and replies (today: in-app messages and links only)
+- Design format for the embroiderer/digitizer once decided (DST, EMB, PDF…)
 
 ## Builder improvements
-- Visual zone editor in the admin (draw locations on product photos; replaces the JSON setting)
-- Zone templates per apron style, assigned to products
 - PDF / AI / EPS preview (server conversion with Ghostscript)
 - Estimator calibration from past jobs with known stitch counts
 - Text-only embroidery (name/wording with font choice), multiple locations per apron
