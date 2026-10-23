@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { zipSync, strToU8 } from "fflate";
 import prisma from "../db.server";
 import { fileUrls, type AdminLike } from "./files.server";
+import { firstDecoration } from "./spec";
 
 // Design center helpers: workflow stages, customer links, signed file URLs and the production package.
 
@@ -17,7 +18,7 @@ export async function ensureToken(id: string, token: string | null) {
 }
 
 // The customer's design page, through the shop's app proxy (renders inside the store theme).
-export const customerLink = (shop: string, token: string) => `https://${shop}/apps/embroidery/design/${token}`;
+export const customerLink = (shop: string, token: string) => `https://${shop}/apps/imprint/design/${token}`;
 
 /* ---------- signed URLs for files served by the app (no admin session in <img> or downloads) ---------- */
 
@@ -98,17 +99,22 @@ const esc = (s: unknown) =>
 // One-page spec sheet (HTML, prints well) for the embroiderer/digitizer.
 export function specSheetHtml(ref: string, s: any, files: { mockup?: string; artwork?: string; proof?: string }) {
   const sp = s.spec ?? {};
+  const d = firstDecoration(sp);
+  const emb = (d?.method.kind ?? "embroidery") === "embroidery";
   const rows: [string, string][] = [
     ["Reference", ref],
     ["Apron", `${sp.product?.title ?? s.productTitle ?? "—"}${sp.variant?.title ? ` · ${sp.variant.title}` : ""}`],
-    ["Location", sp.zone?.label ?? "—"],
-    ["Logo size", sp.size ? `${sp.size.widthIn}" wide × ${sp.size.heightIn}" tall` : "—"],
-    ["Position", sp.position ? `Logo center ${sp.position.centerXIn}" from the left and ${sp.position.centerYIn}" from the top of the ${sp.position.zoneWidthIn}" × ${sp.position.zoneHeightIn}" location` : "—"],
-    ["Background", sp.background === "kept" ? "Kept: stitch the logo's background as a solid fill" : sp.background === "removed" ? `Removed${sp.insideAreasStitched ? " (areas inside the logo are stitched)" : ""}` : "None"],
-    ["Est. stitches", sp.estimate ? `≈ ${Number(sp.estimate.stitches).toLocaleString()} (fill ${sp.estimate.fillSqIn} sq in, satin ${sp.estimate.satinSqIn} sq in, outline ${sp.estimate.outlineIn} in)` : "—"],
+    ["Method", d?.method.name ?? "—"],
+    ["Location", d?.zone?.label ?? "—"],
+    ["Logo size", d?.size ? `${d.size.widthIn}" wide × ${d.size.heightIn}" tall` : "—"],
+    ["Position", d?.position ? `Logo center ${d.position.centerXIn}" from the left and ${d.position.centerYIn}" from the top of the ${d.position.zoneWidthIn}" × ${d.position.zoneHeightIn}" location` : "—"],
+    ["Background", d?.background === "kept" ? `Kept: ${emb ? "stitch" : "print"} the logo's background as a solid fill` : d?.background === "removed" ? `Removed${d?.insideAreasStitched ? " (areas inside the logo are filled)" : ""}` : "None"],
+    ...(emb
+      ? ([["Est. stitches", d?.estimate ? `≈ ${Number(d.estimate.stitches).toLocaleString()} (fill ${d.estimate.fillSqIn} sq in, satin ${d.estimate.satinSqIn} sq in, outline ${d.estimate.outlineIn} in)` : "—"]] as [string, string][])
+      : []),
     ["Quantity", String(sp.quantity ?? s.quantity ?? "—")],
   ];
-  const colors = (sp.colors ?? [])
+  const colors = (d?.colors ?? [])
     .map((c: any, i: number) => `<tr><td>${i + 1}</td><td><span class="sw" style="background:${esc(c.hex)}"></span>${esc(c.hex)}</td><td>${esc(c.pantone || "—")}</td><td>${Math.round((c.share ?? 0) * 100)}%</td></tr>`)
     .join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(ref)} spec sheet</title>
@@ -117,13 +123,13 @@ export function specSheetHtml(ref: string, s: any, files: { mockup?: string; art
 table{border-collapse:collapse;width:100%}td{border-bottom:1px solid #e5e5e5;padding:6px 8px;vertical-align:top}td:first-child{color:#666;width:150px}
 .sw{display:inline-block;width:14px;height:14px;border:1px solid #999;border-radius:3px;margin-right:6px;vertical-align:-2px}
 @media print{body{margin:12mm}}</style></head><body>
-<h1>${esc(ref)} · embroidery spec</h1><div>Generated ${new Date().toLocaleString("en-US")}</div>
+<h1>${esc(ref)} · ${esc(d?.method.name ?? "Embroidery")} spec</h1><div>Generated ${new Date().toLocaleString("en-US")}</div>
 <div class="grid">${files.mockup ? `<div><strong>Mockup</strong><br><img src="${esc(files.mockup)}" alt=""></div>` : ""}${files.artwork ? `<div><strong>Artwork (as approved colors)</strong><br><img src="${esc(files.artwork)}" alt=""></div>` : ""}${files.proof ? `<div><strong>Proof</strong><br><img src="${esc(files.proof)}" alt=""></div>` : ""}</div>
 <table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>
-<h2 style="font-size:16px;margin-top:24px">Thread colors</h2>
+<h2 style="font-size:16px;margin-top:24px">${emb ? "Thread" : "Ink"} colors</h2>
 <table><tr><td>#</td><td>Hex</td><td>Pantone</td><td>Share of logo</td></tr>${colors}</table>
 ${s.notes ? `<h2 style="font-size:16px;margin-top:24px">Customer notes</h2><p>${esc(s.notes)}</p>` : ""}
-<p style="color:#666;margin-top:24px">Stitch count is the builder's estimate. Thread is matched to the hex or Pantone at digitizing.</p>
+<p style="color:#666;margin-top:24px">${emb ? "Stitch count is the builder's estimate. Thread is matched to the hex or Pantone at digitizing." : "Inks are matched to the closest stock color unless a Pantone code is given."}</p>
 </body></html>`;
 }
 

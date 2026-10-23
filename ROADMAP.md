@@ -1,4 +1,4 @@
-# Embroidery Builder roadmap
+# Imprint Customizer roadmap
 
 ## Shipped (MVP)
 - Product page block "Embroidery builder": apron color + location, logo upload (background removal, color detection), place/size within limits, hex/Pantone colors, stitch + price estimate, review and submit
@@ -16,6 +16,21 @@
 - Design center: gallery with stages and "Needs reply", design page with mockup/artwork/proof, specs, stitch breakdown, price, conversation and internal notes, proof upload, production package (.zip)
 - Customer design page through the app proxy: view proof, approve, request changes, message the team; link on the order confirmation
 - Payment stays at checkout; proof approval comes after payment and before production
+
+## Shipped: methods, phase A (Oct 23)
+- Renamed to Imprint Customizer; Shopify data under `imprint.*` (old `embroidery.*` data copied over)
+- Methods with their own pricing and rules (DayStar Premium Embroidery, Embroidery, Screen Printing), editable in admin
+- Location templates belong to a method; per-location max size and optional min width, max colors, max stitches, quantity multiples
+- Builder: choose the method first; switch later without re-uploading; screen-print ink colors and custom Pantone fee
+- Server re-checks every design against the method and template before pricing checkout
+- Design data stored as a list of decorations (one for now; front + back later)
+
+## Methods: next phases
+- Get from ApronWarehouse: real max print/embroidery sizes per location, stock ink color list, max ink colors, whether screen print can go on pockets, how "40 per style and color" applies to multi-color orders
+- Screen print: gradient/photo detection with a suggestion to simplify the art; stock ink picker
+- Several decorations per order (e.g. embroidered chest + printed back), priced per decoration
+- "Help me choose" after upload (suggest a method from the logo's colors and detail); side-by-side price comparison
+- More methods if ApronWarehouse adds them (sublimation, DTF): full-color handling, variant eligibility, resolution check at print size
 
 ## Checkout follow-ups
 - Server-side stitch recount from the uploaded logo (today the server trusts the builder's estimate; price tiers and fees are server-side)

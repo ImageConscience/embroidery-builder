@@ -1,4 +1,4 @@
-# Embroidery Builder
+# Imprint Customizer
 
 Custom Shopify app for apronwarehouse.com. Customers upload a logo, place and size it within allowed embroidery locations, set colors (hex or Pantone), see a live stitch and price estimate, and submit the design for a quote.
 
@@ -26,20 +26,22 @@ The app does not start without `SHOPIFY_API_KEY`. Until these are set, Railway k
 
 ## What's built
 
-- **Theme block "Embroidery builder"** (`extensions/embroidery-builder`): adds a "Customize with your logo" button to product pages that have a location template. Steps: apron color and location, upload (PNG/JPG/SVG preview; a plain background can be removed or kept as part of the design), place and size within the location's limits, colors (suggested hex, optional Pantone), live stitch and price estimate, review and checkout.
-- **App embed "Embroidery builder switch"** (Theme settings > App embeds): the master on/off switch per theme. Off: the builder is hidden on every product page of that theme, even where the block is placed.
-- **Checkout** (`/proxy/submit`): saves the design (original logo, flat-color artwork, mockup to Shopify Files), prices it on the server and sends the customer to a draft-order checkout: apron line, embroidery line, setup line. The embroidery line carries a link to the customer's design page.
-- **Location templates** (admin > Location templates): draw locations on a reference product photo, set the scale with a measuring line, and apply the template to products by picking them, by collection, product type, vendor or tag. Templates are Shopify metaobjects (`embroidery_location_template`); products point to one with the product metafield `embroidery.location_template`, so other tools (bulk editor, Matrixify, CSV) can assign them too. One template covers every product photographed with the same framing. The builder draws on each product's embroidery mockup photo (`embroidery.mockup_photo`, a file metafield on the product, optionally per variant for each color), which can differ from the gallery photos; the template editor can start from an uploaded photo or from a product that already has one, and photos can be uploaded per product from the template page. Products without both a template and a mockup photo don't show the builder.
-- **Design center** (admin home): every design with its mockup, stage (New, In review, Proof sent, Changes requested, Approved, In production, Done, Cancelled), payment status and a "Needs reply" flag. The design page shows the mockup, artwork, proof, specs, thread colors, the stitch estimate breakdown and price, a conversation with internal notes, proof upload, the customer link, and a production package (.zip with original logo, artwork, mockup, proof, printable spec sheet and spec JSON).
-- **Customer design page** (`https://<shop>/apps/embroidery/design/<token>`, rendered in the store theme): the customer sees the mockup or proof, approves it or asks for changes, and messages the team. No emails are sent; staff copy the link from the design page.
+- **Methods** (admin > Methods): each customization method has its own pricing and rules. Defaults are ApronWarehouse's published pricing: DayStar Premium Embroidery (40 minimum per style and color, 40/80/120/320 tiers, pockets), Embroidery (standard, 50 minimum), Screen Printing (50 minimum, ink colors, custom Pantone fee). Pricing types: embroidery (stitches + thread colors) and screen print (ink colors; size doesn't change price). Stored in the app database; checkout is priced from here.
+- **Location templates** (admin > Location templates): each template belongs to one method and marks that method's locations on one photo framing. Each location has a maximum width and height (inches) and optional limits: smallest width, most colors, most stitches (embroidery), quantity in multiples of (e.g. DayStar pockets: 40). Templates are Shopify metaobjects (`imprint_location_template`); products list theirs in `imprint.location_templates` (at most one per method) and the builder draws on `imprint.mockup_photo` (product, or per variant for each color). Apply in bulk in the app or with any tool that writes metafields. Data from the embroidery-only version (`embroidery.*`) is copied over automatically as Embroidery templates.
+- **Theme block "Imprint Customizer"** (`extensions/embroidery-builder`): product pages with a template and a mockup photo get a "Customize with your logo" button. Steps: method (skipped when a product offers one), apron color and location, upload (remove or keep a plain background), place and size within the location's limits, thread or ink colors (hex suggested, optional Pantone), price, checkout. Limits (colors, stitches, quantity multiples, minimum) block checkout with a clear message.
+- **App embed "Imprint Customizer switch"** (Theme settings > App embeds): master on/off switch per theme.
+- **Checkout** (`/proxy/submit`): re-checks the design against the method and the product's template, prices it on the server, saves it (original logo, flat-color artwork, mockup to Shopify Files) and sends the customer to a draft-order checkout: apron line, "<Method>: <Location> (size)" line, setup line. Lines carry the design reference and a link to the customer's design page.
+- **Design center** (admin home): every design with its method, mockup, stage, payment status and "Needs reply" flag; design page with specs, colors, stitch breakdown (embroidery), price, conversation, proof upload, customer link and production package (.zip with spec sheet).
+- **Customer design page** (`https://<shop>/apps/imprint/design/<token>`): proof, approve or request changes, messages. No emails are sent.
 
 ## Endpoints
 
 - `/health`: Railway health check
 - `/app`: admin screens (inside Shopify admin)
-- `/proxy/*`: storefront requests, reached at `https://<shop>/apps/embroidery/*`
+- `/proxy/*`: storefront requests, reached at `https://<shop>/apps/imprint/*`
 - `/proxy/ping`: confirms the app proxy is wired up
 - `/proxy/submit`: storefront design submission (multipart POST)
+- `/proxy/config`: enabled methods and estimator for the builder
 - `/proxy/design/<token>`: the customer's design page (Liquid, through the app proxy)
 - `/files/<id>/<kind>`: signed links to design files and the production package
 

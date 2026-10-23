@@ -3,8 +3,9 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { draftOrderStatus } from "../lib/checkout.server";
 import { addEvent, fileLinks, stageLabel } from "../lib/design.server";
+import { firstDecoration } from "../lib/spec";
 
-// The customer's design page: https://<shop>/apps/embroidery/design/<token>
+// The customer's design page: https://<shop>/apps/imprint/design/<token>
 // Rendered by the store theme (Liquid response through the app proxy). Shows the mockup or proof,
 // the specs and the conversation, and lets the customer approve the proof, ask for changes or write to the team.
 
@@ -71,7 +72,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const payment = s.draftOrderId && admin ? await draftOrderStatus(admin, s.draftOrderId).catch(() => null) : null;
   const paid = payment?.status === "COMPLETED";
   const done = new URL(request.url).searchParams.get("done");
-  const action = `/apps/embroidery/design/${esc(token)}`;
+  const action = `/apps/imprint/design/${esc(token)}`;
 
   const hasProof = !!(s.proofFileId || s.proofData);
   const proofIsImage = /^image\//.test(s.proofType ?? "");
@@ -100,14 +101,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       ? `<div class="status act"><strong>Your order isn't complete yet.</strong> <a class="btn" style="margin-top:8px" href="${esc(s.checkoutUrl)}">Complete checkout</a></div>`
       : "";
 
-  const colors = (sp.colors ?? [])
+  const deco = firstDecoration(sp);
+  const colors = (deco?.colors ?? [])
     .map((c: any) => `<span class="sw" style="background:${esc(/^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#ccc")}"></span>${esc(c.pantone || c.hex)}`)
     .join("&nbsp; ");
   const rows: [string, string][] = [
     ["Apron", `${esc(sp.product?.title ?? s.productTitle ?? "")}${sp.variant?.title ? ` · ${esc(sp.variant.title)}` : ""}`],
-    ["Location", esc(sp.zone?.label ?? s.zoneLabel ?? "")],
-    ["Logo size", sp.size ? `${esc(sp.size.widthIn)}″ × ${esc(sp.size.heightIn)}″` : ""],
-    ["Thread colors", colors],
+    ["Method", esc(deco?.method.name ?? "")],
+    ["Location", esc(deco?.zone?.label ?? s.zoneLabel ?? "")],
+    ["Logo size", deco?.size ? `${esc(deco.size.widthIn)}″ × ${esc(deco.size.heightIn)}″` : ""],
+    [deco?.method.kind === "screen_print" ? "Ink colors" : "Thread colors", colors],
     ["Quantity", esc(sp.quantity ?? s.quantity)],
     ["Status", esc(stageLabel(s.stage))],
   ];
@@ -147,13 +150,13 @@ ${status}${payBox}
     <p class="note">Keep this link: it's how you'll see proofs and replies for this design.</p>
   </div>
 </div>`;
-  return liquid(page(`Your embroidery design`, body));
+  return liquid(page(`Your custom design`, body));
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { session } = await authenticate.public.appProxy(request);
   const token = params.token ?? "";
-  const back = (done: string) => new Response(null, { status: 302, headers: { Location: `/apps/embroidery/design/${encodeURIComponent(token)}?done=${done}` } });
+  const back = (done: string) => new Response(null, { status: 302, headers: { Location: `/apps/imprint/design/${encodeURIComponent(token)}?done=${done}` } });
   const s = token.length >= 16 && session ? await prisma.submission.findFirst({ where: { token, shop: session.shop } }) : null;
   if (!s) return back("missing");
   const form = await request.formData();

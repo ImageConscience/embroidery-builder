@@ -9,12 +9,15 @@ import {
   deleteTemplate,
   ensureDefinitions,
   getTemplate,
+  listTemplates,
+  planAssignment,
   resolveTarget,
   saveTemplate,
   unassignTemplate,
   type Target,
   type TemplateProduct,
 } from "../lib/templates.server";
+import { listMethods } from "../lib/methods.server";
 import {
   photoWidthFromCalibration,
   ratioMismatch,
@@ -38,12 +41,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     .then((j: any) => ({ types: (j?.data?.productTypes?.nodes ?? []) as string[], vendors: (j?.data?.productVendors?.nodes ?? []) as string[] }))
     .catch(() => ({ types: [] as string[], vendors: [] as string[] }));
 
+  const methods = (await listMethods(session.shop)).map((m) => ({ key: m.key, name: m.name, kind: m.kind, enabled: m.enabled }));
+  const url = new URL(request.url);
   if (params.id === "new") {
-    return { id: null, template: null, products: [] as TemplateProduct[], productsMore: false, ...lists };
+    return { id: null, template: null, products: [] as TemplateProduct[], productsMore: false, methods, newMethod: url.searchParams.get("method") ?? "", ...lists };
   }
   const found = await getTemplate(admin, gidFor(params.id ?? ""));
   if (!found) throw new Response("Template not found", { status: 404 });
-  return { id: found.template.id, template: found.template, products: found.products, productsMore: found.productsMore, ...lists };
+  return { id: found.template.id, template: found.template, products: found.products, productsMore: found.productsMore, methods, newMethod: "", ...lists };
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -53,7 +58,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     switch (body.intent) {
       case "save": {
-        const { data, errors } = validateTemplate(body.template);
+        const methodKeys = (await listMethods(session.shop)).map((m) => m.key);
+        const { data, errors } = validateTemplate(body.template, methodKeys);
         if (errors.length) return { intent: "save", ok: false, errors };
         const savedId = await saveTemplate(admin, session.shop, id, data);
         return { intent: "save", ok: true, id: savedId.split("/").pop() };
@@ -61,25 +67,29 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       case "preview":
       case "apply": {
         if (!id) return { intent: body.intent, ok: false, errors: ["Save the template first."] };
+        const found = await getTemplate(admin, id);
+        if (!found?.template.method) return { intent: body.intent, ok: false, errors: ["Choose and save this template's method first."] };
+        const methodOf: Record<string, string> = Object.fromEntries((await listTemplates(admin)).map((t: any) => [t.id, t.method]));
         const products = await resolveTarget(admin, body.target as Target);
-        const toChange = products.filter((p) => p.current !== id);
+        const plan = planAssignment(products, id, found.template.method, methodOf);
         if (body.intent === "preview") {
           return {
             intent: "preview",
             ok: true,
-            total: products.length,
-            already: products.length - toChange.length,
-            replacing: toChange.filter((p) => p.current).length,
-            noPhoto: products.filter((p) => !p.hasPhoto).length,
-            sample: products.slice(0, 8).map((p) => p.title),
+            total: plan.length,
+            already: plan.filter((p) => p.has && !p.replacing).length,
+            replacing: plan.filter((p) => p.replacing).length,
+            noPhoto: plan.filter((p) => !p.hasPhoto).length,
+            sample: plan.slice(0, 8).map((p) => p.title),
           };
         }
-        const r = await assignTemplate(admin, id, toChange.map((p) => p.id));
+        const r = await assignTemplate(admin, plan);
         return { intent: "apply", ok: !r.failed.length, applied: r.done, errors: r.failed.slice(0, 5) };
       }
       case "unassign": {
         const ids = (Array.isArray(body.productIds) ? body.productIds : []).filter((s: unknown) => typeof s === "string");
-        const n = await unassignTemplate(admin, ids);
+        if (!id) return { intent: "unassign", ok: false, errors: ["Nothing to remove."] };
+        const n = await unassignTemplate(admin, id, ids);
         return { intent: "unassign", ok: true, removed: n };
       }
       case "delete": {
@@ -99,7 +109,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 /* ---------------- editor ---------------- */
 
-const EMPTY: TemplateData = { name: "", photoWidthIn: 0, photoRatio: 0, zones: [], calibration: null, referenceImage: "", notes: "" };
+const EMPTY: TemplateData = { name: "", method: "", photoWidthIn: 0, photoRatio: 0, zones: [], calibration: null, referenceImage: "", notes: "" };
 type Mode = "select" | "ruler";
 type Drag =
   | { kind: "draw"; x0: number; y0: number }
@@ -118,7 +128,7 @@ export default function TemplateEditor() {
   const fetcher = useFetcher<any>();
   const applyFetcher = useFetcher<any>();
 
-  const [tpl, setTpl] = useState<TemplateData>(() => (data.template ? { ...EMPTY, ...data.template } : EMPTY));
+  const [tpl, setTpl] = useState<TemplateData>(() => (data.template ? { ...EMPTY, ...data.template } : { ...EMPTY, method: data.newMethod }));
   const [sel, setSel] = useState<string | null>(() => data.template?.zones?.[0]?.id ?? null);
   const [mode, setMode] = useState<Mode>("select");
   const [dirty, setDirty] = useState(false);
@@ -128,7 +138,7 @@ export default function TemplateEditor() {
 
   // Reset when navigating between templates.
   useEffect(() => {
-    setTpl(data.template ? { ...EMPTY, ...data.template } : EMPTY);
+    setTpl(data.template ? { ...EMPTY, ...data.template } : { ...EMPTY, method: data.newMethod });
     setSel(data.template?.zones?.[0]?.id ?? null);
     setDirty(false);
   }, [data.id]);
@@ -138,6 +148,7 @@ export default function TemplateEditor() {
     setDirty(true);
   };
   const zone = tpl.zones.find((z) => z.id === sel) ?? null;
+  const methodKind = data.methods.find((m) => m.key === tpl.method)?.kind ?? "embroidery";
   const setZone = (id: string, patch: Partial<Zone>) =>
     update((t) => ({ ...t, zones: t.zones.map((z) => (z.id === id ? { ...z, ...patch } : z)) }));
 
@@ -212,7 +223,7 @@ export default function TemplateEditor() {
       <s-button variant="primary" onClick={() => fileInput.current?.click()} loading={uploading || undefined}>
         Upload from computer
       </s-button>
-      <s-button onClick={openChooser}>Choose from products with an embroidery photo</s-button>
+      <s-button onClick={openChooser}>Choose from products with a mockup photo</s-button>
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => uploadPhoto(e.target.files?.[0])} />
     </div>
   );
@@ -228,7 +239,7 @@ export default function TemplateEditor() {
         <p className="tpe-note">
           {photosFetcher.data?.products?.length
             ? "No products match."
-            : "No products have an embroidery mockup photo yet. Upload a photo from your computer instead, or add photos to products (product metafield embroidery.mockup_photo)."}
+            : "No products have a mockup photo yet. Upload a photo from your computer instead, or add photos to products (product metafield imprint.mockup_photo)."}
         </p>
       ) : (
         <div className="tpe-photo-grid">
@@ -341,7 +352,8 @@ export default function TemplateEditor() {
   const saving = fetcher.state !== "idle";
 
   const steps = [
-    { done: !!tpl.referenceImage, text: "Add the embroidery photo" },
+    { done: !!tpl.method, text: "Choose the method" },
+    { done: !!tpl.referenceImage, text: "Add the mockup photo" },
     { done: tpl.photoWidthIn > 1, text: "Set the scale" },
     { done: tpl.zones.length > 0, text: "Draw the locations" },
     { done: !!data.id && !dirty, text: "Save" },
@@ -444,8 +456,8 @@ export default function TemplateEditor() {
           ) : (
             <div className="tpe-empty">
               <p>
-                <strong>Start with the embroidery photo.</strong> Use the same photo layout the products will use for the
-                builder (their embroidery mockup photo). It doesn't have to be one of the product's gallery photos.
+                <strong>Start with the mockup photo.</strong> Use the same photo layout the products will use in the
+                builder (their imprint mockup photo). It doesn't have to be one of the product's gallery photos.
               </p>
               {photoButtons}
               {chooserPanel}
@@ -455,6 +467,21 @@ export default function TemplateEditor() {
 
         <div className="tpe-side">
           <s-section heading="Template">
+            <label className="tpe-field">
+              <span>Method</span>
+              <select value={tpl.method} onChange={(e) => update((t) => ({ ...t, method: e.target.value }))}>
+                <option value="">Choose the method…</option>
+                {data.methods.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.name}
+                    {m.enabled ? "" : " (not offered yet)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {data.id && data.products.length ? (
+              <p className="tpe-note">Changing the method affects the {data.products.length} product{data.products.length === 1 ? "" : "s"} using this template.</p>
+            ) : null}
             <label className="tpe-field">
               <span>Name</span>
               <input value={tpl.name} maxLength={120} placeholder="Bib apron, front, 3:4 photo" onChange={(e) => update((t) => ({ ...t, name: e.target.value }))} />
@@ -531,10 +558,29 @@ export default function TemplateEditor() {
                       {tpl.photoWidthIn > 1 && (zone.maxW > box.w + 0.05 || zone.maxH > box.h + 0.05) ? (
                         <p className="tpe-warn">The largest logo is bigger than the area drawn, so it will be limited to the area ({fmt(box.w)}″ × {fmt(box.h)}″). Draw a bigger area or lower the size.</p>
                       ) : null}
-                      <label className="tpe-field">
-                        <span>Smallest logo width (in, optional)</span>
-                        <input type="number" min="0" step="0.25" value={zone.minW ?? ""} onChange={(e) => setZone(zone.id, { minW: parseFloat(e.target.value) || undefined })} />
-                      </label>
+                      <div className="tpe-row">
+                        <label className="tpe-field">
+                          <span>Smallest logo width (in)</span>
+                          <input type="number" min="0" step="0.25" placeholder="Optional" value={zone.minW ?? ""} onChange={(e) => setZone(zone.id, { minW: parseFloat(e.target.value) || undefined })} />
+                        </label>
+                        <label className="tpe-field">
+                          <span>Most colors</span>
+                          <input type="number" min="1" step="1" placeholder="No limit" value={zone.maxColors ?? ""} onChange={(e) => setZone(zone.id, { maxColors: parseInt(e.target.value, 10) || undefined })} />
+                        </label>
+                      </div>
+                      <div className="tpe-row">
+                        {methodKind === "embroidery" ? (
+                          <label className="tpe-field">
+                            <span>Most stitches</span>
+                            <input type="number" min="500" step="500" placeholder="No limit" value={zone.maxStitches ?? ""} onChange={(e) => setZone(zone.id, { maxStitches: parseInt(e.target.value, 10) || undefined })} />
+                          </label>
+                        ) : null}
+                        <label className="tpe-field">
+                          <span>Quantity in multiples of</span>
+                          <input type="number" min="1" step="1" placeholder="Any" value={zone.qtyStep ?? ""} onChange={(e) => setZone(zone.id, { qtyStep: parseInt(e.target.value, 10) || undefined })} />
+                        </label>
+                      </div>
+                      <p className="tpe-note">Optional limits for this location. For example, DayStar pockets are ordered in multiples of 40.</p>
                     </>
                   );
                 })()}
@@ -627,9 +673,10 @@ function ApplySection(props: {
       <s-section heading="Apply to products">
         <p className="tpe-note">
           Apply this template to every product that uses the same photo layout. The builder shows on a product once it has
-          both this template and an embroidery mockup photo. With Shopify's bulk editor or an import tool you can also set the
-          product metafields <code>embroidery.location_template</code> and <code>embroidery.mockup_photo</code> (and
-          <code>embroidery.mockup_photo</code> on variants for a photo per color).
+          a location template and a mockup photo. A product keeps one template per method, so applying this template
+          replaces only the product's other template for the same method. With Shopify's bulk editor or an import tool you
+          can also set the product metafields <code>imprint.location_templates</code> and <code>imprint.mockup_photo</code>{" "}
+          (and <code>imprint.mockup_photo</code> on variants for a photo per color).
         </p>
         {props.dirty ? <p className="tpe-warn">Save your changes first. Products use the saved version of the template.</p> : null}
         <div className="tpe-row">
@@ -677,7 +724,7 @@ function ApplySection(props: {
           <p className="tpe-note">
             {preview.total === 0
               ? "No products match."
-              : `${preview.total} product${preview.total === 1 ? "" : "s"} match. ${preview.already ? `${preview.already} already use this template. ` : ""}${preview.replacing ? `${preview.replacing} currently use a different template and will switch to this one. ` : ""}${preview.noPhoto ? `${preview.noPhoto} don't have an embroidery photo yet, so the builder stays hidden on them until one is added. ` : ""}For example: ${preview.sample.join(", ")}${preview.total > preview.sample.length ? "…" : ""}`}
+              : `${preview.total} product${preview.total === 1 ? "" : "s"} match. ${preview.already ? `${preview.already} already use this template. ` : ""}${preview.replacing ? `${preview.replacing} currently use another template for this method and will switch to this one. ` : ""}${preview.noPhoto ? `${preview.noPhoto} don't have a mockup photo yet, so the builder stays hidden on them until one is added. ` : ""}For example: ${preview.sample.join(", ")}${preview.total > preview.sample.length ? "…" : ""}`}
           </p>
         ) : null}
         {r && !r.ok && r.errors?.length ? <p className="tpe-warn">{r.errors.join(" ")}</p> : null}
@@ -708,7 +755,7 @@ function ApplySection(props: {
                     </td>
                     <td>
                       {!p.hasPhoto ? (
-                        <span className="tpe-tag is-warn">No embroidery photo: builder hidden</span>
+                        <span className="tpe-tag is-warn">No mockup photo: builder hidden</span>
                       ) : ratioMismatch(props.photoRatio, p.width, p.height) ? (
                         <span className="tpe-tag is-warn">Photo shape differs</span>
                       ) : (
@@ -747,14 +794,14 @@ function ApplySection(props: {
   );
 }
 
-// Upload an embroidery mockup photo for one product (sets its embroidery.mockup_photo metafield).
+// Upload a mockup photo for one product (sets its imprint.mockup_photo metafield).
 function PhotoUpload({ productId, label }: { productId: string; label: string }) {
   const f = useFetcher<any>();
   const shopify = useAppBridge();
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (f.state !== "idle" || !f.data) return;
-    if (f.data.ok) shopify.toast.show("Embroidery photo saved");
+    if (f.data.ok) shopify.toast.show("Mockup photo saved");
     else shopify.toast.show(f.data.error ?? "Upload failed", { isError: true });
     if (input.current) input.current.value = "";
   }, [f.state, f.data]);

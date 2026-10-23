@@ -1,4 +1,4 @@
-/* Hidden unless the "Embroidery builder switch" app embed is on for this theme. */
+/* Hidden unless the "Imprint Customizer switch" app embed is on for this theme. */
 .emb-root[data-emb-root]{display:none}
 .emb-open{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin:12px 0;padding:12px 20px;border:0;border-radius:8px;background:var(--emb-accent,#B44A31);color:#fff;font:inherit;font-weight:700;cursor:pointer}
 .emb-open:hover{filter:brightness(.95)}
@@ -69,3 +69,10 @@
 .emb-bgopt strong{display:block}
 .emb-bgimg{flex:0 0 72px;height:72px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:repeating-conic-gradient(#d9d4cb 0 25%,#f4f1ea 0 50%) 50%/14px 14px}
 .emb-bgimg img{max-width:68px;max-height:68px}
+.emb-method{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;margin:0 0 10px;padding:14px 16px;border:2px solid #DDD5C6;border-radius:12px;background:#fff;font:inherit;cursor:pointer;color:inherit}
+.emb-method:hover{border-color:var(--emb-accent,#B44A31)}
+.emb-method.is-on{border-color:var(--emb-accent,#B44A31);background:#FFF8F4}
+.emb-method strong{font-size:16px}
+.emb-method span{font-size:14px;opacity:.8}
+.emb-method .emb-method-meta{font-size:13px;opacity:.7}
+.emb-link{border:0;background:none;padding:0;margin:4px 0;font:inherit;font-size:14px;color:var(--emb-accent,#B44A31);text-decoration:underline;cursor:pointer}

@@ -93,3 +93,32 @@ model Message {
 
   @@index([submissionId, createdAt])
 }
+
+// A customization method (DayStar embroidery, standard embroidery, screen print…). Methods own their
+// pricing and rules; location templates belong to a method.
+model Method {
+  id                  String   @id @default(cuid())
+  shop                String
+  key                 String // e.g. daystar_embroidery; templates refer to it
+  name                String
+  kind                String // pricing/colour engine: embroidery | screen_print
+  description         String   @default("")
+  enabled             Boolean  @default(true)
+  position            Int      @default(0)
+  minimum             Int
+  minimumRule         String   @default("total") // total | per_variant
+  tiers               Json // [{ min, price }] price per piece
+  setupFee            Float
+  includedStitches    Int?
+  perThousandStitches Float?
+  includedColors      Int
+  perExtraColor       Float
+  customColorFee      Float    @default(0) // per custom (Pantone / non-stock) colour per piece
+  maxColors           Int?
+  leadTime            String   @default("")
+  colorNote           String   @default("")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @default(now()) @updatedAt
+
+  @@unique([shop, key])
+}

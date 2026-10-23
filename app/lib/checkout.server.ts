@@ -6,6 +6,8 @@ export type CheckoutInput = {
   name: string;
   variantId: string | number;
   quantity: number;
+  methodName: string;
+  methodKind: string;
   zoneLabel: string;
   sizeLabel: string;
   colorsLabel: string;
@@ -35,8 +37,8 @@ export async function createCheckout(admin: AdminLike, c: CheckoutInput) {
       variables: {
         input: {
           ...(c.email ? { email: c.email } : {}),
-          note: `Custom embroidery design ${c.ref}. Mockup, logo and specs are in the Embroidery Builder app.`,
-          tags: ["embroidery-builder", c.ref],
+          note: `Custom ${c.methodName.toLowerCase()} design ${c.ref}. Mockup, logo and specs are in the Imprint Customizer app.`,
+          tags: ["imprint-customizer", c.ref],
           lineItems: [
             {
               variantId: String(c.variantId).startsWith("gid://") ? c.variantId : `gid://shopify/ProductVariant/${c.variantId}`,
@@ -44,22 +46,23 @@ export async function createCheckout(admin: AdminLike, c: CheckoutInput) {
               customAttributes: [design],
             },
             {
-              title: `Custom embroidery: ${c.zoneLabel} (${c.sizeLabel})`,
+              title: `${c.methodName}: ${c.zoneLabel} (${c.sizeLabel})`,
               originalUnitPriceWithCurrency: money(c.perApron),
               quantity: c.quantity,
               requiresShipping: false,
               taxable: true,
               customAttributes: [
                 design,
+                { key: "Method", value: c.methodName },
                 { key: "Location", value: c.zoneLabel },
                 { key: "Size", value: c.sizeLabel },
                 { key: "Colors", value: c.colorsLabel.slice(0, 250) },
-                { key: "Est. stitches", value: String(Math.round(c.stitches)) },
+                ...(c.methodKind === "embroidery" ? [{ key: "Est. stitches", value: String(Math.round(c.stitches)) }] : []),
                 ...(c.designUrl ? [{ key: "Your design and proof", value: c.designUrl }] : []),
               ],
             },
             {
-              title: "Embroidery setup (one time)",
+              title: `${c.methodName} setup (one time)`,
               originalUnitPriceWithCurrency: money(c.setupFee),
               quantity: 1,
               requiresShipping: false,

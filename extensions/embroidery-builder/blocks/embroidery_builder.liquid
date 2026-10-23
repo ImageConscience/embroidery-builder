@@ -1,34 +1,38 @@
 {%- comment -%}
-  Embroidery builder app block. Add it to the product template in the theme editor.
-  Locations come from the product's location template (product metafield embroidery.location_template,
-  managed in the app under Location templates), drawn on the product's embroidery mockup photo
-  (metafield embroidery.mockup_photo, product or variant). Without both, the builder doesn't show.
-  The JSON setting is only a fallback for products without a template.
-  Pricing comes from the app server (/apps/embroidery/config) so checkout and the builder always match.
+  Imprint Customizer app block. Add it to the product template in the theme editor.
+  The product's location templates (product metafield imprint.location_templates, one per method, managed in the
+  app under Location templates) decide which methods and locations are offered. They're drawn on the product's
+  mockup photo (metafield imprint.mockup_photo, product or variant). Without a template and a photo, the builder
+  doesn't show. The JSON setting is only a fallback for products without templates.
+  Methods and pricing come from the app server (/apps/imprint/config) so checkout and the builder always match.
 {%- endcomment -%}
 {%- liquid
   assign first_variant = product.selected_or_first_available_variant
   assign main_image = first_variant.featured_image | default: product.featured_image
-  assign tpl = product.metafields.embroidery.location_template.value
-  assign product_photo = product.metafields.embroidery.mockup_photo.value
+  assign tpls = product.metafields.imprint.location_templates.value
+  assign has_tpl = false
+  if tpls != blank and tpls.size > 0
+    assign has_tpl = true
+  endif
+  assign product_photo = product.metafields.imprint.mockup_photo.value
   assign has_photo = false
   if product_photo != blank
     assign has_photo = true
   else
     for v in product.variants
-      if v.metafields.embroidery.mockup_photo.value != blank
+      if v.metafields.imprint.mockup_photo.value != blank
         assign has_photo = true
         break
       endif
     endfor
   endif
   assign use_fallback = false
-  if tpl == blank and block.settings.use_fallback and block.settings.zones_json != blank
+  if has_tpl == false and block.settings.use_fallback and block.settings.zones_json != blank
     assign use_fallback = true
   endif
   assign show_builder = false
   if product
-    if tpl != blank and has_photo
+    if has_tpl and has_photo
       assign show_builder = true
     elsif use_fallback and main_image
       assign show_builder = true
@@ -38,8 +42,8 @@
 {%- if show_builder -%}
   {%- if request.design_mode -%}
     <p class="emb-embed-off" style="padding:8px 12px;border:1px dashed #b44a31;border-radius:8px;font-size:13px">
-      Embroidery builder is switched off for this theme, so customers don't see it. Turn on
-      "Embroidery builder switch" in Theme settings &gt; App embeds.
+      Imprint Customizer is switched off for this theme, so customers don't see it. Turn on
+      "Imprint Customizer switch" in Theme settings &gt; App embeds.
     </p>
   {%- endif -%}
   <div class="emb-root" data-emb-root id="emb-{{ block.id }}" {{ block.shopify_attributes }}>
@@ -49,7 +53,7 @@
     </button>
     <script type="application/json" data-emb-config>
       {
-        "proxyPath": "/apps/embroidery",
+        "proxyPath": "/apps/imprint",
         "shop": {{ shop.permanent_domain | json }},
         "product": {
           "id": {{ product.id | json }},
@@ -60,11 +64,11 @@
         },
         "variants": [
           {%- for v in product.variants -%}
-            {%- if tpl != blank -%}
-              {%- assign vimg = v.metafields.embroidery.mockup_photo.value | default: product_photo -%}
+            {%- if has_tpl -%}
+              {%- assign vimg = v.metafields.imprint.mockup_photo.value | default: product_photo -%}
               {%- if vimg == blank -%}
                 {%- for v2 in product.variants -%}
-                  {%- if v2.metafields.embroidery.mockup_photo.value != blank -%}{%- assign vimg = v2.metafields.embroidery.mockup_photo.value -%}{%- break -%}{%- endif -%}
+                  {%- if v2.metafields.imprint.mockup_photo.value != blank -%}{%- assign vimg = v2.metafields.imprint.mockup_photo.value -%}{%- break -%}{%- endif -%}
                 {%- endfor -%}
               {%- endif -%}
             {%- else -%}
@@ -80,12 +84,19 @@
           {%- endfor -%}
         ],
         "selectedVariantId": {{ first_variant.id | json }},
-        "template": {%- if tpl != blank -%}{
-          "name": {{ tpl.name.value | json }},
-          "photoWidthIn": {{ tpl.photo_width_in.value | json }},
-          "photoRatio": {{ tpl.photo_ratio.value | json }},
-          "zones": {{ tpl.zones.value | json }}
-        }{%- else -%}null{%- endif -%},
+        "templates": [
+          {%- if has_tpl -%}
+            {%- for t in tpls -%}
+              {
+                "method": {{ t.method.value | json }},
+                "name": {{ t.name.value | json }},
+                "photoWidthIn": {{ t.photo_width_in.value | json }},
+                "photoRatio": {{ t.photo_ratio.value | json }},
+                "zones": {{ t.zones.value | json }}
+              }{%- unless forloop.last -%},{%- endunless -%}
+            {%- endfor -%}
+          {%- endif -%}
+        ],
         "zones": {%- if use_fallback -%}{{ block.settings.zones_json }}{%- else -%}[]{%- endif -%},
         "currency": {{ cart.currency.iso_code | json }},
         "accent": {{ block.settings.accent_color | json }}
@@ -94,19 +105,19 @@
   </div>
 {%- elsif request.design_mode and product -%}
   <p style="padding:8px 12px;border:1px dashed #b44a31;border-radius:8px;font-size:13px">
-    {%- if tpl == blank -%}
-      Embroidery builder: this product has no location template, so customers won't see the builder here.
-      Assign one in the Embroidery Builder app under Location templates.
+    {%- if has_tpl == false -%}
+      Imprint Customizer: this product has no location template, so customers won't see the builder here.
+      Assign one in the Imprint Customizer app under Location templates.
     {%- else -%}
-      Embroidery builder: this product has a location template but no embroidery mockup photo, so customers won't see the builder here.
-      Add one in the app (Location templates, then the template's product list) or in the product's metafield "Embroidery mockup photo".
+      Imprint Customizer: this product has location templates but no mockup photo, so customers won't see the builder here.
+      Add one in the app (Location templates, then the template's product list) or in the product's metafield "Imprint mockup photo".
     {%- endif -%}
   </p>
 {%- endif -%}
 
 {% schema %}
 {
-  "name": "Embroidery builder",
+  "name": "Imprint Customizer",
   "target": "section",
   "javascript": "embroidery-builder.js",
   "stylesheet": "embroidery-builder.css",
@@ -125,13 +136,13 @@
     },
     {
       "type": "header",
-      "content": "Products without a location template"
+      "content": "Products without location templates"
     },
     {
       "type": "checkbox",
       "id": "use_fallback",
       "label": "Show the builder using the locations below",
-      "info": "Off: the builder only appears on products with a location template (set in the app under Location templates).",
+      "info": "Off: the builder only appears on products with location templates (set in the app under Location templates). Fallback locations are priced as standard embroidery.",
       "default": false
     },
     {

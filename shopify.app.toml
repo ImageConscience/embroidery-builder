@@ -1,7 +1,7 @@
-# Shopify app configuration for the ApronWarehouse embroidery builder.
-# App: Embroidery Builder (Dev Dashboard)
+# Shopify app configuration for Imprint Customizer (ApronWarehouse logo customization: embroidery, screen printing…).
+# App: Imprint Customizer (Dev Dashboard; first created as "Embroidery Builder")
 client_id = "6e5e33dbe1fcdb8aec8f7b4cbe8b13ca"
-name = "Embroidery Builder"
+name = "Imprint Customizer"
 application_url = "https://embuild-app-production.up.railway.app"
 embedded = true
 
@@ -23,10 +23,10 @@ redirect_urls = [
 ]
 
 # Storefront requests from the builder go through the shop's domain:
-# https://<shop>/apps/embroidery/...  ->  https://embuild-app-production.up.railway.app/proxy/...
+# https://<shop>/apps/imprint/...  ->  https://embuild-app-production.up.railway.app/proxy/...
 [app_proxy]
 url = "https://embuild-app-production.up.railway.app/proxy"
-subpath = "embroidery"
+subpath = "imprint"
 prefix = "apps"
 
 [webhooks]

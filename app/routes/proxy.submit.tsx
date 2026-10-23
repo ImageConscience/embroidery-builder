@@ -3,10 +3,11 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { uploadToShopifyFiles } from "../lib/files.server";
 import { createCheckout } from "../lib/checkout.server";
-import { PRICING, priceEmbroidery } from "../lib/pricing.server";
+import { checkDesign } from "../lib/validate.server";
+import { firstDecoration } from "../lib/spec";
 import { addEvent, customerLink, newToken } from "../lib/design.server";
 
-// Storefront submission: POST https://<shop>/apps/embroidery/submit (multipart form).
+// Storefront submission: POST https://<shop>/apps/imprint/submit (multipart form).
 // Saves the design, then creates a draft order priced on the server and returns its checkout link.
 // Fields: logo (file), mockup (png), spec (JSON), email (optional), notes, rights.
 
@@ -51,14 +52,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch {
     return bad("Design details were missing. Please try again.");
   }
-  const quantity = Math.max(1, Math.min(100000, parseInt(spec?.quantity, 10) || 1));
-  if (quantity < PRICING.minimum) return bad(`Custom embroidery has a ${PRICING.minimum}-apron minimum.`);
   if (!spec?.variant?.id) return bad("Please choose an apron color.");
-  // Price on the server. Stitches and colors come from the builder's estimate (charged as final).
-  const stitches = Math.max(500, Number(spec?.estimate?.stitches) || 0);
-  const colorCount = Math.max(1, Math.min(20, parseInt(spec?.colorCount, 10) || 1));
-  const price = priceEmbroidery(quantity, stitches, colorCount);
+  if (spec?.version !== 2 || !Array.isArray(spec?.decorations)) return bad("Please reload the page and try again; the customizer was updated.");
+  // Price on the server from the method and check the location's limits.
+  const checked = await checkDesign(admin, session.shop, spec);
+  if (!checked.ok) return bad(checked.error);
+  const { method, quantity, stitches, price } = checked;
   spec.serverPrice = price;
+  const deco = firstDecoration(spec)!;
 
   const logoBytes = new Uint8Array(await logo.arrayBuffer());
   const mockupBytes =
@@ -81,9 +82,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       notes: str(form.get("notes"), 4000) || null,
       productTitle: spec?.product?.title ?? null,
       variantTitle: spec?.variant?.title ?? null,
-      zoneLabel: spec?.zone?.label ?? null,
+      zoneLabel: deco.zone?.label ?? null,
       quantity,
-      estTotal: price.embroideryTotal,
+      estTotal: price.total,
       spec,
       logoName: logo.name.slice(0, 200),
       logoType: logo.type || "application/octet-stream",
@@ -92,7 +93,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
   const ref = `EMB-${sub.number}`;
   const designUrl = customerLink(session.shop, token);
-  await addEvent(sub.id, `Design submitted from the product page (${spec?.product?.title ?? "apron"}).`, "customer").catch(() => {});
+  await addEvent(sub.id, `Design submitted from the product page (${method.name}, ${spec?.product?.title ?? "apron"}).`, "customer").catch(() => {});
 
   // Files go to Shopify Files; if that fails, keep the bytes in the database instead.
   const update: Record<string, unknown> = {};
@@ -135,7 +136,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   let checkoutUrl: string;
   try {
-    const colorsLabel = (spec?.colors ?? [])
+    const colorsLabel = deco.colors
       .map((c: any) => (c?.pantone ? `${c.pantone} (${c.hex})` : c?.hex))
       .filter(Boolean)
       .join(", ");
@@ -145,11 +146,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       name,
       variantId: spec.variant.id,
       quantity,
-      zoneLabel: String(spec?.zone?.label ?? "Logo"),
-      sizeLabel: `${spec?.size?.widthIn ?? "?"}″ × ${spec?.size?.heightIn ?? "?"}″`,
+      methodName: method.name,
+      methodKind: method.kind,
+      zoneLabel: String(deco.zone?.label ?? "Logo"),
+      sizeLabel: `${deco.size?.widthIn ?? "?"}″ × ${deco.size?.heightIn ?? "?"}″`,
       colorsLabel,
       stitches,
-      perApron: price.perApron,
+      perApron: price.perPiece,
       setupFee: price.setupFee,
       designUrl,
     });

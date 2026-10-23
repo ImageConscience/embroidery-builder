@@ -7,7 +7,9 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { draftOrderStatus } from "../lib/checkout.server";
 import { uploadToShopifyFiles } from "../lib/files.server";
-import { ESTIMATOR, PRICING } from "../lib/pricing.server";
+import { ESTIMATOR } from "../lib/pricing.server";
+import { getMethod } from "../lib/methods.server";
+import { firstDecoration } from "../lib/spec";
 import { addEvent, customerLink, ensureToken, fileLinks, signedUrl } from "../lib/design.server";
 import { STAGES, isStage, stageLabel } from "../lib/stages";
 
@@ -42,7 +44,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     packageUrl: signedUrl(s.id, "package", 3600, true),
     logoDownload: s.logoData ? `${signedUrl(s.id, "logo", 3600, true)}&download=1` : links.logo,
     messages: s.messages.map((m) => ({ id: m.id, kind: m.kind, author: m.author, authorName: m.authorName, body: m.body, createdAt: m.createdAt.toISOString() })),
-    pricing: { includedStitches: PRICING.includedStitches, includedColors: PRICING.includedColors, perThousand: PRICING.perThousandStitches, perExtraColor: PRICING.perExtraColor },
+    deco: firstDecoration(s.spec),
+    pricing: await (async () => {
+      const m = await getMethod(session.shop, firstDecoration(s.spec)?.method.key ?? "standard_embroidery");
+      return { includedStitches: m?.includedStitches ?? 6000, includedColors: m?.includedColors ?? 4, perThousand: m?.perThousandStitches ?? 1, perExtraColor: m?.perExtraColor ?? 1, customColorFee: m?.customColorFee ?? 0 };
+    })(),
     estimator: ESTIMATOR,
   };
 };
@@ -124,7 +130,9 @@ export default function DesignPage() {
   const msgForm = useRef<HTMLFormElement>(null);
   const proofForm = useRef<HTMLFormElement>(null);
   const sp = d.spec ?? {};
-  const est = sp.estimate ?? {};
+  const deco: any = d.deco ?? {};
+  const isEmb = (deco.method?.kind ?? "embroidery") === "embroidery";
+  const est = deco.estimate ?? {};
   const price = sp.serverPrice ?? {};
   const busy = nav.state !== "idle";
 
@@ -151,17 +159,18 @@ export default function DesignPage() {
         ["Fill areas", `${fmt(est.fillSqIn, 2)} sq in`, `≈ ${Math.round((est.fillSqIn ?? 0) * est_.fillPerSqIn).toLocaleString()}`],
         ["Satin (narrow) areas", `${fmt(est.satinSqIn, 2)} sq in`, `≈ ${Math.round((est.satinSqIn ?? 0) * est_.satinPerSqIn).toLocaleString()}`],
         ["Outlines", `${fmt(est.outlineIn, 1)} in`, `≈ ${Math.round((est.outlineIn ?? 0) * est_.runPerIn).toLocaleString()}`],
-        ["Color changes", `${sp.colorCount ?? (sp.colors ?? []).length}`, `≈ ${((sp.colorCount ?? 0) * est_.perColor).toLocaleString()}`],
+        ["Color changes", `${deco.colorCount ?? 0}`, `≈ ${((deco.colorCount ?? 0) * est_.perColor).toLocaleString()}`],
         ["Base (tie-ins, trims)", "", `≈ ${est_.base}`],
       ]
     : [];
 
   const designRows: [string, string][] = [
     ["Apron", `${sp.product?.title ?? "—"}${sp.variant?.title ? ` · ${sp.variant.title}` : ""}`],
-    ["Location", sp.zone?.label ?? "—"],
-    ["Logo size", sp.size ? `${sp.size.widthIn}″ wide × ${sp.size.heightIn}″ tall` : "—"],
-    ["Position", sp.position ? `Center ${sp.position.centerXIn}″ from left, ${sp.position.centerYIn}″ from top of the ${sp.position.zoneWidthIn}″ × ${sp.position.zoneHeightIn}″ area` : "—"],
-    ["Background", sp.background === "kept" ? "Kept (stitched as a solid fill)" : sp.background === "removed" ? `Removed${sp.insideAreasStitched ? ", inside areas stitched" : ""}` : "None detected"],
+    ["Method", deco.method?.name ?? "—"],
+    ["Location", deco.zone?.label ?? "—"],
+    ["Logo size", deco.size ? `${deco.size.widthIn}″ wide × ${deco.size.heightIn}″ tall` : "—"],
+    ["Position", deco.position ? `Center ${deco.position.centerXIn}″ from left, ${deco.position.centerYIn}″ from top of the ${deco.position.zoneWidthIn}″ × ${deco.position.zoneHeightIn}″ area` : "—"],
+    ["Background", deco.background === "kept" ? `Kept (${isEmb ? "stitched" : "printed"} as a solid fill)` : deco.background === "removed" ? `Removed${deco.insideAreasStitched ? ", inside areas filled" : ""}` : "None detected"],
     ["Quantity", String(sp.quantity ?? "—")],
   ];
 
@@ -237,7 +246,7 @@ export default function DesignPage() {
             </tr>
           </thead>
           <tbody>
-            {(sp.colors ?? []).map((c: any, i: number) => (
+            {(deco.colors ?? []).map((c: any, i: number) => (
               <tr key={i}>
                 <td><span className="ds-sw" style={{ background: c.hex }} /></td>
                 <td>{c.hex}</td>
@@ -251,11 +260,11 @@ export default function DesignPage() {
           </tbody>
         </table>
         <p className="ds-note">
-          {sp.colorCount ?? (sp.colors ?? []).length} distinct colors · {d.pricing.includedColors} included
+          {deco.colorCount ?? 0} distinct colors · {d.pricing.includedColors} included{deco.customColorCount ? ` · ${deco.customColorCount} custom Pantone ink${deco.customColorCount === 1 ? "" : "s"}` : ""}
         </p>
       </s-section>
 
-      <s-section heading="Stitch estimate and price">
+      <s-section heading={isEmb ? "Stitch estimate and price" : "Price"}>
         {est.stitches ? (
           <>
             <p className="ds-big">≈ {Math.round(est.stitches).toLocaleString()} stitches</p>
@@ -274,17 +283,20 @@ export default function DesignPage() {
               </tbody>
             </table>
           </>
-        ) : (
+        ) : isEmb ? (
           <p className="ds-note">No estimate recorded.</p>
+        ) : (
+          <p className="ds-note">Logo size doesn't change the price for this method.</p>
         )}
         <table className="ds-table ds-price">
           <tbody>
-            <tr><td>Embroidery per apron (tier)</td><td className="ds-num">{money(price.tierPrice ?? sp.price?.tierPrice)}</td></tr>
-            <tr><td>Extra stitches per apron</td><td className="ds-num">{price.extraK ? `${price.extraK}k × ${money(d.pricing.perThousand)}` : "—"}</td></tr>
+            <tr><td>{deco.method?.name ?? "Embroidery"} per apron (tier)</td><td className="ds-num">{money(price.tierPrice ?? sp.price?.tierPrice)}</td></tr>
+            {isEmb ? <tr><td>Extra stitches per apron</td><td className="ds-num">{price.extraK ? `${price.extraK}k × ${money(d.pricing.perThousand)}` : "—"}</td></tr> : null}
+            {!isEmb && price.customColors ? <tr><td>Custom Pantone inks per apron</td><td className="ds-num">{`${price.customColors} × ${money(d.pricing.customColorFee)}`}</td></tr> : null}
             <tr><td>Extra colors per apron</td><td className="ds-num">{price.extraColors ? `${price.extraColors} × ${money(d.pricing.perExtraColor)}` : "—"}</td></tr>
-            <tr><td>Per apron</td><td className="ds-num">{money(price.perApron ?? sp.price?.perApron)}</td></tr>
+            <tr><td>Per apron</td><td className="ds-num">{money(price.perPiece ?? price.perApron ?? sp.price?.perApron)}</td></tr>
             <tr><td>Setup (one time)</td><td className="ds-num">{money(price.setupFee ?? sp.price?.setupFee)}</td></tr>
-            <tr className="ds-total"><td>Embroidery total</td><td className="ds-num">{money(price.embroideryTotal ?? sp.price?.total)}</td></tr>
+            <tr className="ds-total"><td>{isEmb ? "Embroidery" : "Decoration"} total</td><td className="ds-num">{money(price.total ?? price.embroideryTotal ?? sp.price?.total)}</td></tr>
           </tbody>
         </table>
       </s-section>

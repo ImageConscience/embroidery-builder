@@ -6,6 +6,7 @@ import prisma from "../db.server";
 import { fileUrls } from "../lib/files.server";
 import { signedUrl } from "../lib/design.server";
 import { STAGES, stageLabel } from "../lib/stages";
+import { firstDecoration } from "../lib/spec";
 
 // Design center: every customer design with its mockup, workflow stage and payment status.
 
@@ -88,9 +89,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         company: r.company,
         product: [r.productTitle, r.variantTitle].filter(Boolean).join(" · "),
         zone: r.zoneLabel,
-        size: sp.size ? `${sp.size.widthIn}″ × ${sp.size.heightIn}″` : "",
-        stitches: sp.estimate?.stitches ?? null,
-        colors: (sp.colors ?? []).map((c: any) => c.hex as string),
+        method: firstDecoration(sp)?.method.name ?? "",
+        size: firstDecoration(sp)?.size ? `${firstDecoration(sp)!.size!.widthIn}″ × ${firstDecoration(sp)!.size!.heightIn}″` : "",
+        stitches: firstDecoration(sp)?.estimate?.stitches ?? null,
+        colors: (firstDecoration(sp)?.colors ?? []).map((c: any) => c.hex as string),
         quantity: r.quantity,
         total: r.estTotal,
         paid: r.draftOrderId ? r.draftOrderId in paid : false,
@@ -159,7 +161,7 @@ export default function DesignCenter() {
                   <span className={`dc-badge tone-${TONE[r.stage] ?? "neutral"}`}>{stageLabel(r.stage)}</span>
                 </div>
                 <div className="dc-line">{r.customer || "Customer at checkout"}{r.company ? ` · ${r.company}` : ""}</div>
-                <div className="dc-line dc-muted">{r.product}</div>
+                <div className="dc-line"><span className="dc-method">{r.method}</span> {r.product}</div>
                 <div className="dc-line dc-muted">
                   {r.zone} {r.size ? `· ${r.size}` : ""} {r.stitches ? `· ≈${(Math.round(r.stitches / 100) * 100).toLocaleString()} stitches` : ""}
                 </div>
@@ -198,6 +200,7 @@ export default function DesignCenter() {
         .dc-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
         .dc-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .dc-muted{color:#616161}
+        .dc-method{font-size:11px;font-weight:600;background:#f1f1f1;border-radius:6px;padding:1px 6px;margin-right:4px}
         .dc-foot{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
         .dc-swatches{display:flex;gap:3px}
         .dc-swatches i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,.2);display:inline-block}

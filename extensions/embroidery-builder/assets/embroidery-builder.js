@@ -1,9 +1,14 @@
-/* Embroidery builder (storefront). Vanilla JS, no dependencies.
+/* Imprint Customizer builder (storefront). Vanilla JS, no dependencies.
    Steps: apron + location, upload, place + size, colors, price, review + submit. */
 (function () {
   "use strict";
 
+  // Used only for the fallback JSON locations (products without a location template).
   var DEFAULT_PRICING = {
+    key: "standard_embroidery",
+    name: "Embroidery",
+    kind: "embroidery",
+    customColorFee: 0,
     minimum: 50,
     tiers: [
       { min: 50, price: 8.95 },
@@ -21,7 +26,7 @@
     fillPerSqIn: 1800, satinPerSqIn: 1100, runPerIn: 12, perColor: 60, base: 150,
     satinMaxWidthIn: 0.25, uncertainty: 0.2
   };
-  var STEPS = ["Apron & spot", "Upload", "Place & size", "Colors", "Price", "Checkout"];
+  var STEP_NAMES = ["Apron & spot", "Upload", "Place & size", "Colors", "Price", "Checkout"];
   var PREVIEW_TYPES = /^image\/(png|jpe?g|svg\+xml|webp|gif)$/i;
   var MAX_FILE = 20 * 1024 * 1024;
   var PROC_MAX = 700;
@@ -326,17 +331,21 @@
   }
   function countMask(m) { var c = 0; for (var i = 0; i < m.length; i++) c += m[i]; return c; }
 
-  function price(pr, qty, stitches, colors) {
+  // Same engine as the server (app/lib/methods.ts priceFor); the server prices checkout.
+  function price(pr, qty, stitches, colors, customColors) {
     var tiers = (pr.tiers || []).slice().sort(function (a, b) { return a.min - b.min; });
     var tier = tiers[0] || { min: 0, price: 0 };
     tiers.forEach(function (t) { if (qty >= t.min) tier = t; });
-    var extraK = Math.max(0, Math.ceil((stitches - pr.includedStitches) / 1000));
+    var embroidery = pr.kind !== "screen_print" && pr.includedStitches != null;
+    var extraK = embroidery ? Math.max(0, Math.ceil(((stitches || 0) - pr.includedStitches) / 1000)) : 0;
+    var perK = pr.perThousandStitches || 0;
     var extraColors = Math.max(0, colors - pr.includedColors);
-    var perApron = tier.price + extraK * pr.perThousandStitches + extraColors * pr.perExtraColor;
+    var custom = pr.kind === "screen_print" ? Math.max(0, customColors || 0) : 0;
+    var perApron = Math.round((tier.price + extraK * perK + extraColors * pr.perExtraColor + custom * (pr.customColorFee || 0)) * 100) / 100;
     return {
-      tier: tier, extraK: extraK, extraColors: extraColors, perApron: perApron,
-      embroidery: qty * tier.price, stitchCharge: qty * extraK * pr.perThousandStitches,
-      colorCharge: qty * extraColors * pr.perExtraColor, setup: pr.setupFee,
+      tier: tier, extraK: extraK, extraColors: extraColors, customColors: custom, perApron: perApron,
+      embroidery: qty * tier.price, stitchCharge: qty * extraK * perK,
+      colorCharge: qty * extraColors * pr.perExtraColor, customCharge: qty * custom * (pr.customColorFee || 0), setup: pr.setupFee,
       total: perApron * qty + pr.setupFee, belowMin: qty < pr.minimum
     };
   }
@@ -351,7 +360,10 @@
     if (typeof zones === "string") { try { zones = JSON.parse(zones); } catch (e) { zones = null; } }
     if (!(pw > 0) || !Array.isArray(zones) || !zones.length) return null;
     return zones.map(function (z) {
-      return { id: z.id, label: z.label, x: +z.x, y: +z.y, w: +z.w, h: +z.h, widthIn: +z.w * pw, maxW: +z.maxW || 0, maxH: +z.maxH || 0, minW: +z.minW || 0 };
+      return {
+        id: z.id, label: z.label, x: +z.x, y: +z.y, w: +z.w, h: +z.h, widthIn: +z.w * pw, maxW: +z.maxW || 0, maxH: +z.maxH || 0,
+        minW: +z.minW || 0, maxColors: +z.maxColors || 0, maxStitches: +z.maxStitches || 0, qtyStep: +z.qtyStep || 0
+      };
     });
   }
 
@@ -360,9 +372,20 @@
     this.pricing = merge(DEFAULT_PRICING, cfg.pricing);
     this.est = merge(DEFAULT_EST, cfg.estimator);
     var vendor = String((cfg.product && cfg.product.vendor) || "");
-    this.zones = templateZones(cfg.template) || (Array.isArray(cfg.zones) ? cfg.zones : []).filter(function (z) {
-      return !z.daystarOnly || /daystar/i.test(vendor);
-    });
+    // One location template per method (from the product's imprint.location_templates).
+    this.templates = (Array.isArray(cfg.templates) ? cfg.templates : []).map(function (t) {
+      return t && { method: String(t.method || ""), name: t.name, zones: templateZones(t) };
+    }).filter(function (t) { return t && t.method && t.zones; });
+    this.methods = null; // from the server (/config)
+    this.methodKey = null;
+    if (this.templates.length) this.zones = [];
+    else {
+      // Fallback: locations JSON from the block setting, priced as standard embroidery.
+      this.zones = (Array.isArray(cfg.zones) ? cfg.zones : []).filter(function (z) {
+        return !z.daystarOnly || /daystar/i.test(vendor);
+      });
+      this.methodKey = DEFAULT_PRICING.key;
+    }
     var vs = cfg.variants || [];
     this.variant = vs.filter(function (v) { return v.id === cfg.selectedVariantId; })[0] || vs[0];
     this.zone = this.zones[0];
@@ -421,20 +444,61 @@
     if (this.prevFocus && this.prevFocus.focus) this.prevFocus.focus();
   };
 
-  // Pricing and estimator constants come from the app server so checkout always matches.
+  // Methods (pricing and rules) and estimator constants come from the app server so checkout always matches.
   Builder.prototype.loadConfig = function () {
     var self = this;
-    if (!this.cfg.proxyPath) return;
+    if (!this.cfg.proxyPath) { this.methods = []; return; }
     fetch(this.cfg.proxyPath + "/config", { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
-        if (!j || !self.modal) return;
-        if (j.pricing) self.pricing = merge(DEFAULT_PRICING, j.pricing);
+        if (!self.modal) return;
+        j = j || {};
         if (j.estimator) { self.est = merge(DEFAULT_EST, j.estimator); self.estKey = null; }
-        self.qty = Math.max(self.qty, self.pricing.minimum || 1);
+        self.methods = Array.isArray(j.methods) ? j.methods : [];
+        if (!self.templates.length) {
+          var std = self.methods.filter(function (m) { return m.key === DEFAULT_PRICING.key; })[0];
+          if (std) self.pricing = merge(DEFAULT_PRICING, std);
+          self.qty = Math.max(self.qty, self.pricing.minimum || 1);
+        } else {
+          var av = self.availableMethods();
+          if (av.length === 1) self.setMethod(av[0].key, true);
+        }
         self.render();
       })
-      .catch(function () { /* keep defaults */ });
+      .catch(function () { self.methods = []; self.render(); });
+  };
+
+  // Methods this product offers: enabled on the server and with a location template on the product.
+  Builder.prototype.availableMethods = function () {
+    var self = this;
+    if (!this.templates.length) return [];
+    return (this.methods || []).filter(function (m) {
+      return self.templates.some(function (t) { return t.method === m.key; });
+    });
+  };
+
+  Builder.prototype.setMethod = function (key, silent) {
+    var m = (this.methods || []).filter(function (x) { return x.key === key; })[0];
+    var t = this.templates.filter(function (x) { return x.method === key; })[0];
+    if (!m || !t) return;
+    var prev = this.zone && this.zone.label, changed = this.methodKey && this.methodKey !== key;
+    this.methodKey = key;
+    this.pricing = merge(DEFAULT_PRICING, m);
+    this.zones = t.zones;
+    this.zone = this.zones.filter(function (z) { return z.label === prev; })[0] || this.zones[0];
+    this.place = {};
+    this.estKey = null;
+    this.qty = Math.max(this.qty, this.pricing.minimum || 1);
+    return changed && !silent ? "Switched to " + m.name + ". Check the size and placement: each method has its own limits." : "";
+  };
+
+  Builder.prototype.method = function () { return this.pricing; };
+  Builder.prototype.isEmbroidery = function () { return this.pricing.kind !== "screen_print"; };
+  Builder.prototype.showMethodStep = function () { return this.templates.length > 0 && this.availableMethods().length !== 1; };
+  Builder.prototype.steps = function () {
+    var names = STEP_NAMES.slice(), fns = [this.stepApron, this.stepUpload, this.stepPlace, this.stepColors, this.stepPrice, this.stepSubmit];
+    if (this.showMethodStep()) { names.unshift("Method"); fns.unshift(this.stepMethod); }
+    return names.map(function (n, i) { return { name: n, fn: fns[i] }; });
   };
 
   Builder.prototype.loadVariantImage = function () {
@@ -450,13 +514,25 @@
     });
   };
 
+  Builder.prototype.stepIndex = function (name) {
+    var st = this.steps();
+    for (var i = 0; i < st.length; i++) if (st[i].name === name) return i;
+    return -1;
+  };
+  Builder.prototype.stepName = function () { var st = this.steps()[this.step]; return st ? st.name : ""; };
+
   Builder.prototype.canGo = function (i) {
-    if (i <= 1) return true;
+    var st = this.steps(), s = st[i];
+    if (!s) return false;
+    if (s.name === "Method") return true;
+    if (!this.methodKey) return false;
+    if (s.name === "Apron & spot" || s.name === "Upload") return true;
     return !!this.logo;
   };
 
   Builder.prototype.go = function (i) {
-    if (i < 0 || i >= STEPS.length || !this.canGo(i)) return;
+    if (i < 0 || i >= this.steps().length || !this.canGo(i)) return;
+    this.notice = "";
     this.step = i;
     this.error = "";
     this.render();
@@ -536,7 +612,7 @@
       cx.drawImage(this.logoCanvas, bx, by, bw, bh);
       cx.restore();
       this.logoBox = { x: bx, y: by, w: bw, h: bh, ppi: ppi, zone: r2 };
-      if (!exporting && this.step === 2) {
+      if (!exporting && this.stepName() === "Place & size") {
         cx.save();
         cx.strokeStyle = "#FFFDF8"; cx.lineWidth = 1; cx.setLineDash([]);
         cx.strokeRect(bx, by, bw, bh);
@@ -554,7 +630,8 @@
     function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
     cv.addEventListener("pointerdown", function (e) {
       if (!self.logoBox || !self.logo) return;
-      if (self.step !== 2) { if (self.step > 1) self.go(2); return; }
+      var placeIdx = self.stepIndex("Place & size");
+      if (self.step !== placeIdx) { if (self.step > self.stepIndex("Upload")) self.go(placeIdx); return; }
       var p = pos(e), b = self.logoBox, pl = self.getPlace();
       var corners = [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]];
       var onCorner = corners.some(function (c) { return Math.abs(p.x - c[0]) < 14 && Math.abs(p.y - c[1]) < 14; });
@@ -567,7 +644,7 @@
     cv.addEventListener("pointermove", function (e) {
       var p = pos(e), d = self.drag;
       if (!d) {
-        if (self.step === 2 && self.logoBox) {
+        if (self.stepName() === "Place & size" && self.logoBox) {
           var b = self.logoBox;
           cv.style.cursor = (p.x >= b.x - 10 && p.x <= b.x + b.w + 10 && p.y >= b.y - 10 && p.y <= b.y + b.h + 10) ? "move" : "default";
         }
@@ -603,9 +680,10 @@
     });
   };
 
+  // Stitch estimate (embroidery methods only).
   Builder.prototype.currentEstimate = function () {
     var pl = this.getPlace();
-    if (!pl) return null;
+    if (!pl || !this.isEmbroidery()) return null;
     var key = this.zone.id + ":" + pl.w.toFixed(2) + ":" + this.logo.palette.length;
     if (this.estKey !== key) { this.estKey = key; this.estVal = estimateStitches(this.logo, pl.w, this.est); }
     return this.estVal;
@@ -613,10 +691,12 @@
 
   Builder.prototype.updateEstimateLine = function () {
     var n = this.panel.querySelector("[data-est-line]"), e = this.currentEstimate();
-    if (n && e) n.innerHTML = this.estimateSummary(e);
+    if (n) n.innerHTML = this.estimateSummary(e);
+    this.refreshProblems();
   };
 
   Builder.prototype.estimateSummary = function (e) {
+    if (!e) return this.isEmbroidery() ? "" : "Logo size doesn't change the price for " + esc(this.pricing.name.toLowerCase()) + ".";
     var inc = this.pricing.includedStitches;
     if (e.high <= inc) return "About " + fmtInt(round100(e.stitches)) + " stitches: within the " + fmtInt(inc) + " included.";
     if (e.low > inc) {
@@ -630,7 +710,11 @@
     if (!this.modal) return;
     var self = this;
     this.nav.innerHTML = "";
-    STEPS.forEach(function (name, i) {
+    var steps = this.steps();
+    if (this.step >= steps.length) this.step = steps.length - 1;
+    var cur = steps[this.step].name;
+    steps.forEach(function (st, i) {
+      var name = st.name;
       var b = el("button", { type: "button", class: "emb-step" }, (i + 1) + ". " + esc(name));
       if (i === self.step) b.setAttribute("aria-current", "step");
       if (!self.canGo(i)) b.disabled = true;
@@ -639,16 +723,45 @@
     });
     var back = this.modal.querySelector("[data-back]"), next = this.modal.querySelector("[data-next]");
     back.style.visibility = this.step === 0 ? "hidden" : "visible";
-    next.style.visibility = this.step >= STEPS.length - 1 ? "hidden" : "visible";
+    next.style.visibility = this.step >= steps.length - 1 ? "hidden" : "visible";
     next.disabled = !this.canGo(this.step + 1);
-    next.textContent = this.step === 1 && !this.logo ? "Upload a logo to continue" : "Next";
+    next.textContent = cur === "Method" && !this.methodKey ? "Choose a method to continue" : cur === "Upload" && !this.logo ? "Upload a logo to continue" : "Next";
     next.className = this.canGo(this.step + 1) ? "emb-primary" : "emb-btn";
     next.style.width = "auto";
 
     this.panel.innerHTML = "";
-    [this.stepApron, this.stepUpload, this.stepPlace, this.stepColors, this.stepPrice, this.stepSubmit][this.step].call(this, this.panel);
+    steps[this.step].fn.call(this, this.panel);
+    if (this.notice) this.panel.insertBefore(el("p", { class: "emb-ok", role: "status" }, esc(this.notice)), this.panel.firstChild);
     if (this.error) this.panel.insertBefore(el("p", { class: "emb-warn", role: "alert" }, esc(this.error)), this.panel.firstChild);
     this.draw();
+  };
+
+  Builder.prototype.stepMethod = function (p) {
+    var self = this;
+    p.appendChild(el("h3", null, "How should we put your logo on?"));
+    if (this.methods == null) { p.appendChild(el("p", { class: "emb-help" }, "Loading options…")); return; }
+    var av = this.availableMethods();
+    if (!av.length) {
+      p.appendChild(el("p", { class: "emb-warn" }, "Customization isn't available for this apron right now. Please contact us."));
+      return;
+    }
+    av.forEach(function (m) {
+      var tiers = (m.tiers || []).slice().sort(function (a, b) { return a.price - b.price; });
+      var low = tiers[0] ? tiers[0].price : null;
+      var on = m.key === self.methodKey;
+      var b = el("button", { type: "button", class: "emb-method" + (on ? " is-on" : ""), "aria-pressed": String(on) },
+        "<strong>" + esc(m.name) + "</strong>" +
+        (m.description ? "<span>" + esc(m.description) + "</span>" : "") +
+        "<span class='emb-method-meta'>" + (low != null ? "From " + money(low) + " per apron" : "") +
+        " · " + esc(String(m.minimum)) + " minimum" + (m.leadTime ? " · " + esc(m.leadTime) : "") + "</span>");
+      b.addEventListener("click", function () {
+        var msg = self.setMethod(m.key);
+        self.go(self.step + 1);
+        if (msg) { self.notice = msg; self.render(); }
+      });
+      p.appendChild(b);
+    });
+    p.appendChild(el("p", { class: "emb-help" }, "You can switch later without uploading your logo again."));
   };
 
   Builder.prototype.stepApron = function (p) {
@@ -679,7 +792,7 @@
       });
       p.appendChild(sw);
     }
-    p.appendChild(el("p", { class: "emb-label" }, "Embroidery location"));
+    p.appendChild(el("p", { class: "emb-label" }, "Location"));
     if (!this.zones.length) {
       p.appendChild(el("p", { class: "emb-warn" }, "No embroidery locations are set up for this apron yet."));
       return;
@@ -692,7 +805,16 @@
     });
     p.appendChild(chips);
     var zi = this.zoneInches(this.zone);
-    p.appendChild(el("p", { class: "emb-help" }, "Largest logo here: " + Math.min(this.zone.maxW || zi.w, zi.w).toFixed(1) + "″ wide × " + Math.min(this.zone.maxH || zi.h, zi.h).toFixed(1) + "″ tall."));
+    var lim = [], z0 = this.zone;
+    if (z0.maxColors) lim.push("up to " + z0.maxColors + " color" + (z0.maxColors === 1 ? "" : "s"));
+    if (z0.maxStitches && this.isEmbroidery()) lim.push("up to " + fmtInt(z0.maxStitches) + " stitches");
+    if (z0.qtyStep > 1) lim.push("ordered in multiples of " + z0.qtyStep);
+    p.appendChild(el("p", { class: "emb-help" }, "Largest logo here: " + Math.min(z0.maxW || zi.w, zi.w).toFixed(1) + "″ wide × " + Math.min(z0.maxH || zi.h, zi.h).toFixed(1) + "″ tall" + (lim.length ? "; " + lim.join(", ") : "") + "."));
+    if (this.showMethodStep() && this.methodKey) {
+      var sw = el("button", { type: "button", class: "emb-link" }, "Method: " + esc(this.pricing.name) + " · change");
+      sw.addEventListener("click", function () { self.go(self.stepIndex("Method")); });
+      p.appendChild(sw);
+    }
   };
 
   Builder.prototype.stepUpload = function (p) {
@@ -801,24 +923,28 @@
     row.appendChild(center); row.appendChild(reset);
     p.appendChild(row);
     p.appendChild(el("p", { class: "emb-ok", "data-est-line": "" }, this.estimateSummary(this.currentEstimate())));
+    this.problemsBox(p, ["stitches"]);
     this.contrastWarning(p);
   };
 
   Builder.prototype.stepColors = function (p) {
     var self = this, L = this.logo;
-    p.appendChild(el("h3", null, "Thread colors"));
-    p.appendChild(el("p", { class: "emb-help" }, "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match. Almost any color can be matched in thread."));
+    var ink = !this.isEmbroidery();
+    p.appendChild(el("h3", null, ink ? "Ink colors" : "Thread colors"));
+    p.appendChild(el("p", { class: "emb-help" }, ink
+      ? "We suggested a hex color for each color in your logo; we'll match it to the closest stock ink. For an exact brand color, add a Pantone code (custom ink" + (this.pricing.customColorFee ? ", +" + money(this.pricing.customColorFee) + " per apron per color" : "") + ")."
+      : "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match. Almost any color can be matched in thread."));
     L.palette.forEach(function (c, i) {
       var row = el("div", { class: "emb-color-row" });
       var dot = el("span", { class: "emb-dot", "aria-hidden": "true" }); dot.style.background = c.hex;
       var hex = el("input", { class: "emb-input", value: c.hex, "aria-label": "Color " + (i + 1) + " hex", maxlength: "7", spellcheck: "false" });
-      var pms = el("input", { class: "emb-input", value: c.pantone, placeholder: "Pantone (optional)", "aria-label": "Color " + (i + 1) + " Pantone", maxlength: "24" });
+      var pms = el("input", { class: "emb-input", value: c.pantone, placeholder: ink ? "Pantone (custom ink)" : "Pantone (optional)", "aria-label": "Color " + (i + 1) + " Pantone", maxlength: "24" });
       hex.addEventListener("input", function () {
         var v = hex.value.trim(); if (v && v[0] !== "#") v = "#" + v;
         var ok = !!hexToRgb(v); hex.setAttribute("aria-invalid", String(!ok));
         if (ok) { c.hex = v.toUpperCase(); dot.style.background = c.hex; self.logoCanvas = renderLogo(L); self.draw(); self.refreshContrast(); }
       });
-      pms.addEventListener("input", function () { c.pantone = pms.value.trim(); });
+      pms.addEventListener("input", function () { c.pantone = pms.value.trim(); self.refreshColorLine(); });
       row.appendChild(dot); row.appendChild(hex); row.appendChild(pms);
       p.appendChild(row);
     });
@@ -826,11 +952,59 @@
       p.appendChild(el("p", { class: "emb-help" }, "Two colors that should be one? Give them the same hex and they'll count once."));
     }
     this.contrastWarning(p);
-    var n = this.colorCount(), inc = this.pricing.includedColors;
-    p.appendChild(el(n > inc ? "p" : "p", { class: n > inc ? "emb-warn" : "emb-ok" },
-      n + " color" + (n === 1 ? "" : "s") + " · " + inc + " included in the base price" +
-      (n > inc ? " · +" + money((n - inc) * this.pricing.perExtraColor) + " per apron" : "")));
-    p.appendChild(el("p", { class: "emb-help" }, "Thread is matched to your hex or Pantone when the design is digitized. Exact matches aren't guaranteed, and screens show color differently."));
+    p.appendChild(el("div", { "data-color-line": "" }));
+    this.refreshColorLine();
+    this.problemsBox(p, ["colors"]);
+    p.appendChild(el("p", { class: "emb-help" }, (this.pricing.colorNote ? esc(this.pricing.colorNote) + " " : "") +
+      (ink ? "Exact matches aren't guaranteed, and screens show color differently." : "Thread is matched to your hex or Pantone when the design is digitized. Exact matches aren't guaranteed, and screens show color differently.")));
+  };
+
+  Builder.prototype.refreshColorLine = function () {
+    var box = this.panel && this.panel.querySelector("[data-color-line]");
+    if (!box) return;
+    var n = this.colorCount(), inc = this.pricing.includedColors, cc = this.customColorCount(), ink = !this.isEmbroidery();
+    var extra = [];
+    if (n > inc) extra.push("+" + money((n - inc) * this.pricing.perExtraColor) + " per apron for extra colors");
+    if (ink && cc && this.pricing.customColorFee) extra.push("+" + money(cc * this.pricing.customColorFee) + " per apron for " + cc + " custom Pantone ink" + (cc === 1 ? "" : "s"));
+    box.innerHTML = "";
+    box.appendChild(el("p", { class: extra.length ? "emb-warn" : "emb-ok" },
+      n + " color" + (n === 1 ? "" : "s") + " · " + inc + " included in the base price" + (extra.length ? " · " + extra.join(" · ") : "")));
+    this.refreshProblems();
+  };
+
+  // Custom (Pantone) colors, counted once each. Screen printing charges extra for these.
+  Builder.prototype.customColorCount = function () {
+    var g = this.colorGroups(), seen = {};
+    Object.keys(g).forEach(function (hex) { if (g[hex]) seen[g[hex]] = 1; });
+    return Object.keys(seen).length;
+  };
+
+  // Limits from the method and the location: things that stop checkout until fixed.
+  Builder.prototype.problems = function () {
+    var out = [], z = this.zone || {}, m = this.pricing;
+    if (!this.logo) return out;
+    var maxC = Math.min(z.maxColors || Infinity, m.maxColors || Infinity);
+    var n = this.colorCount();
+    if (n > maxC) out.push({ kind: "colors", text: esc(z.label || "This location") + " allows up to " + maxC + " color" + (maxC === 1 ? "" : "s") + " for " + esc(m.name.toLowerCase()) + "; your design has " + n + ". Give similar colors the same hex to merge them." });
+    var e = this.currentEstimate();
+    if (e && z.maxStitches && e.stitches > z.maxStitches) out.push({ kind: "stitches", text: "About " + fmtInt(round100(e.stitches)) + " stitches is more than " + esc(z.label || "this location") + " allows (" + fmtInt(z.maxStitches) + "). Make the logo smaller or simpler." });
+    if (this.qty < (m.minimum || 1)) out.push({ kind: "qty", text: esc(m.name) + " has a " + m.minimum + "-apron minimum." });
+    if (z.qtyStep > 1 && this.qty % z.qtyStep) out.push({ kind: "qty", text: esc(z.label || "This location") + " is ordered in multiples of " + z.qtyStep + " (for example " + Math.ceil(this.qty / z.qtyStep) * z.qtyStep + ")." });
+    return out;
+  };
+  Builder.prototype.problemsBox = function (p, kinds) {
+    var box = el("div", { "data-problems": kinds ? kinds.join(",") : "" });
+    p.appendChild(box);
+    this.refreshProblems();
+  };
+  Builder.prototype.refreshProblems = function () {
+    var self = this;
+    if (!this.panel) return;
+    Array.prototype.forEach.call(this.panel.querySelectorAll("[data-problems]"), function (box) {
+      var kinds = box.getAttribute("data-problems"), list = self.problems().filter(function (x) { return !kinds || kinds.split(",").indexOf(x.kind) >= 0; });
+      box.innerHTML = list.map(function (x) { return "<p class='emb-warn'>" + x.text + "</p>"; }).join("");
+    });
+    this.updateSubmit();
   };
 
   // Distinct colors after the customer's edits (identical hex counts once).
@@ -877,9 +1051,19 @@
       (low.length === 1 ? " is" : " are") + " close to the apron color and may be hard to see. Try a lighter or darker thread on the Colors step, or a different apron color."));
   };
 
+  // Colors that share a hex are one color; a Pantone code entered on any of them names that color.
+  Builder.prototype.colorGroups = function () {
+    var groups = {};
+    this.logo.palette.forEach(function (c) {
+      var k = String(c.hex).toUpperCase();
+      if (!groups[k]) groups[k] = "";
+      if (c.pantone && !groups[k]) groups[k] = c.pantone.toUpperCase();
+    });
+    return groups;
+  };
   Builder.prototype.colorCount = function () {
-    var seen = {};
-    this.logo.palette.forEach(function (c) { seen[(c.pantone || c.hex).toUpperCase()] = 1; });
+    var g = this.colorGroups(), seen = {};
+    Object.keys(g).forEach(function (hex) { seen[g[hex] || hex] = 1; });
     return Object.keys(seen).length;
   };
 
@@ -889,36 +1073,38 @@
   };
 
   Builder.prototype.quote = function () {
-    var e = this.currentEstimate(), pr = price(this.pricing, this.qty, e.stitches, this.colorCount());
+    var e = this.currentEstimate(), pr = price(this.pricing, this.qty, e ? e.stitches : 0, this.colorCount(), this.customColorCount());
     var ap = this.apronPrice();
     var aprons = ap == null ? null : ap * this.qty;
     return { estimate: e, price: pr, aprons: aprons, grand: (aprons || 0) + pr.total };
   };
 
   Builder.prototype.stepPrice = function (p) {
-    var self = this, q = this.quote(), e = q.estimate, pr = q.price, inc = this.pricing.includedStitches;
+    var self = this, q = this.quote(), e = q.estimate, pr = q.price, m = this.pricing, inc = m.includedStitches;
     p.appendChild(el("h3", null, "Estimated price"));
-    p.appendChild(el("p", { class: "emb-label" }, "Estimated stitch count"));
-    p.appendChild(el("p", { class: "emb-big" }, "≈ " + fmtInt(round100(e.stitches))));
-    var pct = clamp(e.stitches / inc, 0, 1.4) / 1.4 * 100;
-    p.appendChild(el("div", { class: "emb-meter" + (e.stitches > inc ? " is-over" : "") }, '<span style="width:' + pct.toFixed(1) + '%"></span>'));
+    if (e) {
+      p.appendChild(el("p", { class: "emb-label" }, "Estimated stitch count"));
+      p.appendChild(el("p", { class: "emb-big" }, "≈ " + fmtInt(round100(e.stitches))));
+      var pct = clamp(e.stitches / inc, 0, 1.4) / 1.4 * 100;
+      p.appendChild(el("div", { class: "emb-meter" + (e.stitches > inc ? " is-over" : "") }, '<span style="width:' + pct.toFixed(1) + '%"></span>'));
+    }
     p.appendChild(el("p", { class: "emb-help", "data-est-line": "" }, this.estimateSummary(e)));
     p.appendChild(el("p", { class: "emb-label" }, "Quantity"));
-    var qty = el("input", { type: "number", class: "emb-input", min: "1", step: "1", value: String(this.qty), "aria-label": "Quantity", inputmode: "numeric" });
+    var qty = el("input", { type: "number", class: "emb-input", min: "1", step: String(this.zone.qtyStep || 1), value: String(this.qty), "aria-label": "Quantity", inputmode: "numeric" });
     qty.addEventListener("change", function () { self.qty = Math.max(1, parseInt(qty.value, 10) || 1); self.render(); });
     p.appendChild(qty);
-    if (pr.belowMin) p.appendChild(el("p", { class: "emb-warn" }, "Custom embroidery has a " + this.pricing.minimum + "-apron minimum."));
+    this.problemsBox(p, ["qty", "colors", "stitches"]);
     var rows = [];
+    var label = m.kind === "screen_print" ? "Screen printing" : "Embroidery";
     if (q.aprons != null) rows.push([this.qty + " aprons × " + money(this.apronPrice()), money(q.aprons)]);
-    rows = rows.concat([
-      ["Embroidery " + this.qty + " × " + money(pr.tier.price), money(pr.embroidery)],
-      ["Extra stitches" + (pr.extraK ? " (" + pr.extraK + "k × " + money(this.pricing.perThousandStitches) + ")" : ""), money(pr.stitchCharge)],
-      ["Extra colors" + (pr.extraColors ? " (" + pr.extraColors + ")" : ""), money(pr.colorCharge)],
-      ["Setup, one time", money(pr.setup)]
-    ]);
+    rows.push([label + " " + this.qty + " × " + money(pr.tier.price), money(pr.embroidery)]);
+    if (m.kind !== "screen_print") rows.push(["Extra stitches" + (pr.extraK ? " (" + pr.extraK + "k × " + money(m.perThousandStitches) + ")" : ""), money(pr.stitchCharge)]);
+    rows.push(["Extra colors" + (pr.extraColors ? " (" + pr.extraColors + ")" : ""), money(pr.colorCharge)]);
+    if (m.kind === "screen_print" && pr.customColors) rows.push(["Custom Pantone inks (" + pr.customColors + ")", money(pr.customCharge)]);
+    rows.push(["Setup, one time", money(pr.setup)]);
     p.appendChild(el("table", { class: "emb-table" }, "<tbody>" + rows.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td></tr>"; }).join("") + "</tbody>"));
     p.appendChild(el("div", { class: "emb-total" }, "<span>Total before tax and shipping</span><span>" + money(q.grand) + "</span>"));
-    p.appendChild(el("p", { class: "emb-help" }, "You'll pay this at checkout. Embroidery is " + money(pr.perApron) + " per apron plus the one-time setup fee. You'll get a digital proof to approve before production."));
+    p.appendChild(el("p", { class: "emb-help" }, "You'll pay this at checkout. " + esc(m.name) + " is " + money(pr.perApron) + " per apron plus the one-time setup fee. You'll get a digital proof to approve before production" + (m.leadTime ? "; production takes " + esc(m.leadTime) : "") + "."));
   };
 
   Builder.prototype.stepSubmit = function (p) {
@@ -933,10 +1119,12 @@
     var colors = this.logo.palette.map(function (c) { return c.pantone ? c.pantone : c.hex; }).join(", ");
     var spec = [
       ["Apron", (this.cfg.product ? this.cfg.product.title : "") + (this.variant ? " · " + this.variant.title : "")],
+      ["Method", this.pricing.name],
       ["Location", this.zone.label], ["Size", pl.w.toFixed(1) + "″ × " + pl.h.toFixed(1) + "″"],
-      ["Colors", colors], ["Est. stitches", "≈ " + fmtInt(round100(q.estimate.stitches))],
-      ["Quantity", String(this.qty)], ["Embroidery + setup", money(q.price.total)], ["Total before tax and shipping", money(q.grand)]
+      ["Colors", colors]
     ];
+    if (q.estimate) spec.push(["Est. stitches", "≈ " + fmtInt(round100(q.estimate.stitches))]);
+    spec.push(["Quantity", String(this.qty)], [this.pricing.name + " + setup", money(q.price.total)], ["Total before tax and shipping", money(q.grand)]);
     p.appendChild(el("table", { class: "emb-spec" }, "<tbody>" + spec.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") + "</tbody>"));
     var emailLab = el("label", { class: "emb-label" }, "Email (optional)");
     var emailIn = el("input", { class: "emb-input", type: "email", value: this.contact.email, autocomplete: "email", placeholder: "We'll fill it in at checkout" });
@@ -949,7 +1137,7 @@
     var chk = el("label", { class: "emb-check" }, '<input type="checkbox"' + (this.rights ? " checked" : "") + '><span>I have the rights to use this logo.</span>');
     chk.querySelector("input").addEventListener("change", function (e) { self.rights = e.target.checked; self.updateSubmit(); });
     p.appendChild(chk);
-    if (q.price.belowMin) p.appendChild(el("p", { class: "emb-warn" }, "Custom embroidery has a " + this.pricing.minimum + "-apron minimum. Change the quantity on the Price step."));
+    this.problemsBox(p);
     var btn = el("button", { type: "button", class: "emb-primary", "data-submit": "" }, this.submitting ? "Preparing checkout…" : "Continue to checkout");
     btn.addEventListener("click", function () { self.submit(); });
     p.appendChild(btn);
@@ -961,7 +1149,7 @@
     var b = this.panel && this.panel.querySelector("[data-submit]");
     if (!b) return;
     var em = this.contact.email.trim();
-    var ok = this.rights && (!em || /.+@.+\..+/.test(em)) && !this.submitting && this.qty >= (this.pricing.minimum || 1);
+    var ok = this.rights && (!em || /.+@.+\..+/.test(em)) && !this.submitting && !this.problems().length;
     b.disabled = !ok;
   };
 
@@ -976,21 +1164,27 @@
     });
   };
 
+  // Spec v2: one decoration for now; the list allows front + back later.
   Builder.prototype.specData = function () {
-    var q = this.quote(), pl = this.getPlace(), self = this;
+    var q = this.quote(), pl = this.getPlace(), self = this, e = q.estimate, m = this.pricing;
     return {
+      version: 2,
       product: this.cfg.product, variant: this.variant ? { id: this.variant.id, title: this.variant.title } : null,
-      zone: { id: this.zone.id, label: this.zone.label },
-      size: { widthIn: +pl.w.toFixed(2), heightIn: +pl.h.toFixed(2) },
-      position: { centerXIn: +pl.cx.toFixed(2), centerYIn: +pl.cy.toFixed(2), zoneWidthIn: +pl.zi.w.toFixed(2), zoneHeightIn: +pl.zi.h.toFixed(2) },
-      colors: this.logo.palette.map(function (c) { return { detected: c.detected, hex: c.hex, pantone: c.pantone, share: +(c.count / self.logo.opaque).toFixed(3) }; }),
-      colorCount: this.colorCount(),
-      estimate: { stitches: Math.round(q.estimate.stitches), low: Math.round(q.estimate.low), high: Math.round(q.estimate.high), fillSqIn: +q.estimate.fillSqIn.toFixed(2), satinSqIn: +q.estimate.satinSqIn.toFixed(2), outlineIn: +q.estimate.outlineIn.toFixed(1) },
       quantity: this.qty,
+      decorations: [{
+        method: { key: m.key, name: m.name, kind: m.kind },
+        zone: { id: this.zone.id, label: this.zone.label },
+        size: { widthIn: +pl.w.toFixed(2), heightIn: +pl.h.toFixed(2) },
+        position: { centerXIn: +pl.cx.toFixed(2), centerYIn: +pl.cy.toFixed(2), zoneWidthIn: +pl.zi.w.toFixed(2), zoneHeightIn: +pl.zi.h.toFixed(2) },
+        colors: this.logo.palette.map(function (c) { return { detected: c.detected, hex: c.hex, pantone: c.pantone, share: +(c.count / self.logo.opaque).toFixed(3) }; }),
+        colorCount: this.colorCount(),
+        customColorCount: this.customColorCount(),
+        estimate: e ? { stitches: Math.round(e.stitches), low: Math.round(e.low), high: Math.round(e.high), fillSqIn: +e.fillSqIn.toFixed(2), satinSqIn: +e.satinSqIn.toFixed(2), outlineIn: +e.outlineIn.toFixed(1) } : null,
+        background: this.logo.bgKept ? "kept" : this.logo.bgRemoved ? "removed" : "none",
+        insideAreasStitched: !!(this.logo.bgRemoved && this.logo.keepEnclosed)
+      }],
       price: { perApron: q.price.perApron, tierPrice: q.price.tier.price, setupFee: q.price.setup, total: +q.price.total.toFixed(2), belowMinimum: q.price.belowMin },
-      logoFile: { name: this.logo.file.name, type: this.logo.file.type, size: this.logo.file.size },
-      background: this.logo.bgKept ? "kept" : this.logo.bgRemoved ? "removed" : "none",
-      insideAreasStitched: !!(this.logo.bgRemoved && this.logo.keepEnclosed)
+      logoFile: { name: this.logo.file.name, type: this.logo.file.type, size: this.logo.file.size }
     };
   };
 
@@ -1032,14 +1226,14 @@
     try { cfg = JSON.parse(cfgEl.textContent); } catch (e) {
       console.error("[embroidery-builder] block settings are not valid JSON", e);
       if (window.Shopify && window.Shopify.designMode) {
-        root.appendChild(el("p", { class: "emb-warn" }, "Embroidery builder: one of the JSON settings (locations, pricing or estimator) isn't valid JSON."));
+        root.appendChild(el("p", { class: "emb-warn" }, "Imprint Customizer: one of the JSON settings (locations, pricing or estimator) isn't valid JSON."));
       }
       return;
     }
     var btn = root.querySelector("[data-emb-open]");
     if (btn) btn.addEventListener("click", function () { new Builder(cfg).open(); });
   }
-  // The "Embroidery builder switch" app embed sets this; without it the builder stays off on this theme.
+  // The "Imprint Customizer switch" app embed sets this; without it the builder stays off on this theme.
   function bootAll() { if (!window.EmbroideryBuilderOn) return; Array.prototype.forEach.call(document.querySelectorAll("[data-emb-root]"), boot); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootAll); else bootAll();
   document.addEventListener("shopify:section:load", bootAll);
