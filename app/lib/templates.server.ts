@@ -2,6 +2,7 @@ import type { AdminLike } from "./files.server";
 import {
   MF_KEY,
   MF_NAMESPACE,
+  MF_PHOTO_KEY,
   TEMPLATE_TYPE,
   type Template,
   type TemplateData,
@@ -61,29 +62,58 @@ export async function ensureDefinitions(admin: AdminLike, shop: string): Promise
     if (!defId) throw new Error("Couldn't create the template definition");
   }
 
-  const mf = await gql(admin, `#graphql
-    query templateMf($ns: String!, $key: String!) {
-      metafieldDefinitions(first: 1, ownerType: PRODUCT, namespace: $ns, key: $key) { nodes { id } }
-    }`, { ns: MF_NAMESPACE, key: MF_KEY });
-  if (!mf?.metafieldDefinitions?.nodes?.length) {
-    const d = await gql(admin, `#graphql
-      mutation createTemplateMf($definition: MetafieldDefinitionInput!) {
-        metafieldDefinitionCreate(definition: $definition) { createdDefinition { id } userErrors { field message code } }
-      }`, {
-      definition: {
-        name: "Embroidery location template",
-        namespace: MF_NAMESPACE,
-        key: MF_KEY,
-        ownerType: "PRODUCT",
-        type: "metaobject_reference",
-        description: "Which embroidery locations the logo builder offers on this product.",
-        validations: [{ name: "metaobject_definition_id", value: defId }],
-        pin: true,
-      },
-    });
-    const errs = d?.metafieldDefinitionCreate?.userErrors ?? [];
-    // TAKEN means another request created it first.
-    userErrors(errs.filter((e: any) => e.code !== "TAKEN"), "metafieldDefinitionCreate");
+  const wanted = [
+    {
+      ownerType: "PRODUCT",
+      key: MF_KEY,
+      name: "Embroidery location template",
+      type: "metaobject_reference",
+      description: "Which embroidery locations the logo builder offers on this product.",
+      validations: [{ name: "metaobject_definition_id", value: defId }],
+    },
+    {
+      ownerType: "PRODUCT",
+      key: MF_PHOTO_KEY,
+      name: "Embroidery mockup photo",
+      type: "file_reference",
+      description: "The photo the logo builder draws on. Must match the framing of the product's location template. Without it the builder doesn't show.",
+      validations: [{ name: "file_type_options", value: JSON.stringify(["Image"]) }],
+    },
+    {
+      ownerType: "PRODUCTVARIANT",
+      key: MF_PHOTO_KEY,
+      name: "Embroidery mockup photo",
+      type: "file_reference",
+      description: "Optional: this color's photo for the logo builder. Falls back to the product's embroidery mockup photo.",
+      validations: [{ name: "file_type_options", value: JSON.stringify(["Image"]) }],
+    },
+  ];
+  for (const w of wanted) {
+    const mf = await gql(admin, `#graphql
+      query defExists($ns: String!, $key: String!, $owner: MetafieldOwnerType!) {
+        metafieldDefinitions(first: 1, ownerType: $owner, namespace: $ns, key: $key) { nodes { id } }
+      }`, { ns: MF_NAMESPACE, key: w.key, owner: w.ownerType });
+    if (mf?.metafieldDefinitions?.nodes?.length) continue;
+    const create = async (definition: Record<string, unknown>) => {
+      const d = await gql(admin, `#graphql
+        mutation createDef($definition: MetafieldDefinitionInput!) {
+          metafieldDefinitionCreate(definition: $definition) { createdDefinition { id } userErrors { field message code } }
+        }`, { definition });
+      // TAKEN means another request created it first.
+      return (d?.metafieldDefinitionCreate?.userErrors ?? []).filter((e: any) => e.code !== "TAKEN");
+    };
+    let errs = await create({ ...w, namespace: MF_NAMESPACE, pin: true });
+    if (errs.length && w.key === MF_PHOTO_KEY) {
+      // Photo fields still work without the "images only" rule; don't block templates over it.
+      console.warn(`[templates] ${w.ownerType} photo definition: ${errs.map((e: any) => e.message).join("; ")}; retrying without validation`);
+      const { validations: _v, ...rest } = w;
+      errs = await create({ ...rest, namespace: MF_NAMESPACE, pin: w.ownerType === "PRODUCT" });
+      if (errs.length) {
+        console.error(`[templates] couldn't create ${w.ownerType} photo definition`, errs);
+        continue;
+      }
+    }
+    userErrors(errs, "metafieldDefinitionCreate");
   }
   ready.set(shop, defId);
   return defId;
@@ -138,20 +168,56 @@ export type TemplateProduct = {
   image: string | null;
   width: number | null;
   height: number | null;
+  hasPhoto: boolean; // has its own embroidery mockup photo (image/width/height are that photo when set)
 };
 
+const PHOTO_FIELD = `photo: metafield(namespace: "${MF_NAMESPACE}", key: "${MF_PHOTO_KEY}") { reference { ... on MediaImage { image { url width height } } } }`;
 const PRODUCT_FIELDS = `
   id title status
   featuredMedia { ... on MediaImage { image { url width height } } }
+  ${PHOTO_FIELD}
 `;
-const toProduct = (p: any): TemplateProduct => ({
-  id: p.id,
-  title: p.title,
-  status: p.status,
-  image: p.featuredMedia?.image?.url ?? null,
-  width: p.featuredMedia?.image?.width ?? null,
-  height: p.featuredMedia?.image?.height ?? null,
-});
+const toProduct = (p: any): TemplateProduct => {
+  const photo = p.photo?.reference?.image;
+  const img = photo ?? p.featuredMedia?.image;
+  return {
+    id: p.id,
+    title: p.title,
+    status: p.status,
+    image: img?.url ?? null,
+    width: img?.width ?? null,
+    height: img?.height ?? null,
+    hasPhoto: !!photo,
+  };
+};
+
+// Products that already have an embroidery mockup photo (for choosing a template's reference photo).
+export async function productsWithPhotos(admin: AdminLike, limit = 2000) {
+  const out: { id: string; title: string; url: string; width: number; height: number }[] = [];
+  let after: string | null = null;
+  let scanned = 0;
+  do {
+    const d: any = await gql(admin, `#graphql
+      query withPhotos($after: String) {
+        products(first: 250, after: $after, sortKey: TITLE) { nodes { id title ${PHOTO_FIELD} } pageInfo { hasNextPage endCursor } }
+      }`, { after });
+    for (const p of d?.products?.nodes ?? []) {
+      const img = p.photo?.reference?.image;
+      if (img?.url) out.push({ id: p.id, title: p.title, url: img.url, width: img.width, height: img.height });
+    }
+    scanned += d?.products?.nodes?.length ?? 0;
+    after = d?.products?.pageInfo?.hasNextPage ? d.products.pageInfo.endCursor : null;
+  } while (after && scanned < limit);
+  return out;
+}
+
+export async function setProductPhoto(admin: AdminLike, productId: string, fileId: string) {
+  const d = await gql(admin, `#graphql
+    mutation setPhoto($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) { metafields { id } userErrors { field message } }
+    }`, { metafields: [{ ownerId: productId, namespace: MF_NAMESPACE, key: MF_PHOTO_KEY, type: "file_reference", value: fileId }] });
+  userErrors(d?.metafieldsSet?.userErrors, "metafieldsSet");
+}
 
 export async function getTemplate(admin: AdminLike, id: string) {
   const d = await gql(admin, `#graphql
@@ -223,9 +289,9 @@ const searchValue = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\
 
 // Resolve a target into product ids, with each product's current template (if any).
 export async function resolveTarget(admin: AdminLike, target: Target) {
-  const out: { id: string; title: string; current: string | null }[] = [];
-  const PRODUCT = `id title metafield(namespace: "${MF_NAMESPACE}", key: "${MF_KEY}") { value }`;
-  const push = (p: any) => out.push({ id: p.id, title: p.title, current: p.metafield?.value ?? null });
+  const out: { id: string; title: string; current: string | null; hasPhoto: boolean }[] = [];
+  const PRODUCT = `id title metafield(namespace: "${MF_NAMESPACE}", key: "${MF_KEY}") { value } photo: metafield(namespace: "${MF_NAMESPACE}", key: "${MF_PHOTO_KEY}") { value }`;
+  const push = (p: any) => out.push({ id: p.id, title: p.title, current: p.metafield?.value ?? null, hasPhoto: !!p.photo?.value });
 
   if (target.kind === "products") {
     const ids = target.ids.filter((i) => /^gid:\/\/shopify\/Product\/\d+$/.test(i)).slice(0, MAX_PRODUCTS);

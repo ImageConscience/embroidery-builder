@@ -654,7 +654,20 @@
   Builder.prototype.stepApron = function (p) {
     var self = this, vs = this.cfg.variants || [];
     p.appendChild(el("h3", null, "Choose apron color and location"));
-    if (vs.length > 1) {
+    var distinct = {};
+    vs.forEach(function (v) { distinct[v.image] = 1; });
+    if (vs.length > 1 && Object.keys(distinct).length < vs.length) {
+      // Colors share one embroidery photo: choose by name.
+      p.appendChild(el("p", { class: "emb-label" }, "Color"));
+      var vc = el("div", { class: "emb-chips" });
+      vs.forEach(function (v) {
+        var b = el("button", { type: "button", class: "emb-chip", "aria-pressed": String(v === self.variant) }, esc(v.title));
+        if (v.available === false) b.disabled = true;
+        b.addEventListener("click", function () { self.variant = v; self.loadVariantImage().then(function () { self.render(); }); });
+        vc.appendChild(b);
+      });
+      p.appendChild(vc);
+    } else if (vs.length > 1) {
       p.appendChild(el("p", { class: "emb-label" }, "Color: " + esc(this.variant ? this.variant.title : "")));
       var sw = el("div", { class: "emb-swatches" }), seen = {};
       vs.forEach(function (v) {

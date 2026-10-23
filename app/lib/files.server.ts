@@ -101,3 +101,25 @@ export async function fileUrls(admin: AdminLike, ids: string[]): Promise<Record<
   }
   return out;
 }
+
+// Upload an image to Shopify Files and wait (up to ~15 s) until Shopify has processed it,
+// so its URL and size are known. Returns the file GID even if processing takes longer.
+export async function uploadImageAndWait(
+  admin: AdminLike,
+  file: { name: string; type: string; bytes: Uint8Array },
+  alt: string,
+): Promise<{ id: string; url: string | null; width: number | null; height: number | null }> {
+  const id = await uploadToShopifyFiles(admin, file, alt);
+  for (let i = 0; i < 15; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const res = await admin.graphql(
+      `#graphql
+      query imageReady($id: ID!) { node(id: $id) { ... on MediaImage { fileStatus image { url width height } } } }`,
+      { variables: { id } },
+    );
+    const n = ((await res.json()) as any)?.data?.node;
+    if (n?.image?.url) return { id, url: n.image.url, width: n.image.width ?? null, height: n.image.height ?? null };
+    if (n?.fileStatus === "FAILED") throw new Error("Shopify couldn't process that image");
+  }
+  return { id, url: null, width: null, height: null };
+}

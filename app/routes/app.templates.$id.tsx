@@ -70,6 +70,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             total: products.length,
             already: products.length - toChange.length,
             replacing: toChange.filter((p) => p.current).length,
+            noPhoto: products.filter((p) => !p.hasPhoto).length,
             sample: products.slice(0, 8).map((p) => p.title),
           };
         }
@@ -159,14 +160,13 @@ export default function TemplateEditor() {
   const save = () => fetcher.submit({ intent: "save", template: tpl } as any, { method: "post", encType: "application/json" });
 
   /* ----- reference photo ----- */
-  const pickPhoto = async () => {
-    const picked: any = await shopify.resourcePicker({ type: "product", action: "select", multiple: false });
-    const p = picked?.[0];
-    const src: string | undefined = p?.images?.[0]?.originalSrc ?? p?.images?.[0]?.src;
-    if (!src) {
-      if (p) shopify.toast.show("That product has no photo", { isError: true });
-      return;
-    }
+  const uploadFetcher = useFetcher<any>();
+  const photosFetcher = useFetcher<any>();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [chooser, setChooser] = useState(false);
+  const [photoQuery, setPhotoQuery] = useState("");
+
+  const applyPhoto = (src: string, title?: string) => {
     const img = new Image();
     img.onload = () => {
       const ratio = img.naturalHeight / img.naturalWidth;
@@ -176,13 +176,72 @@ export default function TemplateEditor() {
           ...t,
           referenceImage: src,
           photoRatio: round(ratio, 4),
-          name: t.name || `${p.title} layout`,
+          name: t.name || (title ? `${title} layout` : ""),
           ...(keepScale ? {} : { calibration: null, photoWidthIn: 0 }),
         };
       });
+      setChooser(false);
     };
+    img.onerror = () => shopify.toast.show("That photo couldn't be loaded", { isError: true });
     img.src = src;
   };
+  const uploadPhoto = (file: File | undefined) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("photo", file);
+    uploadFetcher.submit(fd, { method: "post", action: "/app/api/photos", encType: "multipart/form-data" });
+  };
+  useEffect(() => {
+    const r = uploadFetcher.data;
+    if (uploadFetcher.state !== "idle" || !r) return;
+    if (!r.ok) shopify.toast.show(r.error ?? "Upload failed", { isError: true });
+    else if (r.url) applyPhoto(r.url);
+    else shopify.toast.show("Shopify is still processing the image. Try again in a moment.", { isError: true });
+    if (fileInput.current) fileInput.current.value = "";
+  }, [uploadFetcher.state, uploadFetcher.data]);
+  const openChooser = () => {
+    setChooser(true);
+    if (!photosFetcher.data && photosFetcher.state === "idle") photosFetcher.load("/app/api/photos");
+  };
+  const uploading = uploadFetcher.state !== "idle";
+  const photoProducts: any[] = (photosFetcher.data?.products ?? []).filter((p: any) =>
+    p.title.toLowerCase().includes(photoQuery.trim().toLowerCase()),
+  );
+  const photoButtons = (
+    <div className="tpe-inline">
+      <s-button variant="primary" onClick={() => fileInput.current?.click()} loading={uploading || undefined}>
+        Upload from computer
+      </s-button>
+      <s-button onClick={openChooser}>Choose from products with an embroidery photo</s-button>
+      <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => uploadPhoto(e.target.files?.[0])} />
+    </div>
+  );
+  const chooserPanel = chooser ? (
+    <div className="tpe-chooser">
+      <div className="tpe-inline">
+        <input className="tpe-search" placeholder="Filter products" value={photoQuery} onChange={(e) => setPhotoQuery(e.target.value)} />
+        <button type="button" className="tpe-x" onClick={() => setChooser(false)}>Close</button>
+      </div>
+      {photosFetcher.state !== "idle" && !photosFetcher.data ? (
+        <p className="tpe-note">Loading products…</p>
+      ) : photoProducts.length === 0 ? (
+        <p className="tpe-note">
+          {photosFetcher.data?.products?.length
+            ? "No products match."
+            : "No products have an embroidery mockup photo yet. Upload a photo from your computer instead, or add photos to products (product metafield embroidery.mockup_photo)."}
+        </p>
+      ) : (
+        <div className="tpe-photo-grid">
+          {photoProducts.slice(0, 120).map((p: any) => (
+            <button key={p.id} type="button" onClick={() => applyPhoto(p.url, p.title)} title={p.title}>
+              <img src={`${p.url}${p.url.includes("?") ? "&" : "?"}width=200`} alt="" />
+              <span>{p.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
 
   /* ----- pointer editing on the photo ----- */
   const point = (e: React.PointerEvent) => {
@@ -282,7 +341,7 @@ export default function TemplateEditor() {
   const saving = fetcher.state !== "idle";
 
   const steps = [
-    { done: !!tpl.referenceImage, text: "Choose a reference photo" },
+    { done: !!tpl.referenceImage, text: "Add the embroidery photo" },
     { done: tpl.photoWidthIn > 1, text: "Set the scale" },
     { done: tpl.zones.length > 0, text: "Draw the locations" },
     { done: !!data.id && !dirty, text: "Save" },
@@ -319,6 +378,7 @@ export default function TemplateEditor() {
         <div className="tpe-photo-col">
           {tpl.referenceImage ? (
             <>
+              <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => uploadPhoto(e.target.files?.[0])} />
               <div className="tpe-toolbar">
                 <button type="button" className={mode === "select" ? "is-on" : ""} onClick={() => setMode("select")}>
                   Draw & edit locations
@@ -326,10 +386,14 @@ export default function TemplateEditor() {
                 <button type="button" className={mode === "ruler" ? "is-on" : ""} onClick={() => setMode("ruler")}>
                   Measuring line
                 </button>
-                <button type="button" onClick={pickPhoto}>
-                  Change photo
+                <button type="button" onClick={() => fileInput.current?.click()}>
+                  {uploading ? "Uploading…" : "Upload a different photo"}
+                </button>
+                <button type="button" onClick={openChooser}>
+                  Choose another product's photo
                 </button>
               </div>
+              {chooserPanel}
               <div className="tpe-photo" style={{ aspectRatio: `1 / ${tpl.photoRatio || 1.2}` }}>
                 <img src={tpl.referenceImage} alt="Reference product photo" draggable={false} />
                 <div
@@ -380,12 +444,11 @@ export default function TemplateEditor() {
           ) : (
             <div className="tpe-empty">
               <p>
-                <strong>Start with a product photo.</strong> Pick a product photographed the same way as the products this
-                template will cover. Every product using the template should have a photo with the same framing.
+                <strong>Start with the embroidery photo.</strong> Use the same photo layout the products will use for the
+                builder (their embroidery mockup photo). It doesn't have to be one of the product's gallery photos.
               </p>
-              <s-button variant="primary" onClick={pickPhoto}>
-                Choose a product photo
-              </s-button>
+              {photoButtons}
+              {chooserPanel}
             </div>
           )}
         </div>
@@ -563,8 +626,10 @@ function ApplySection(props: {
     <>
       <s-section heading="Apply to products">
         <p className="tpe-note">
-          Apply this template to every product that uses the same photo layout. You can also set the product metafield
-          <code> embroidery.location_template</code> with Shopify's bulk editor or an import tool.
+          Apply this template to every product that uses the same photo layout. The builder shows on a product once it has
+          both this template and an embroidery mockup photo. With Shopify's bulk editor or an import tool you can also set the
+          product metafields <code>embroidery.location_template</code> and <code>embroidery.mockup_photo</code> (and
+          <code>embroidery.mockup_photo</code> on variants for a photo per color).
         </p>
         {props.dirty ? <p className="tpe-warn">Save your changes first. Products use the saved version of the template.</p> : null}
         <div className="tpe-row">
@@ -612,7 +677,7 @@ function ApplySection(props: {
           <p className="tpe-note">
             {preview.total === 0
               ? "No products match."
-              : `${preview.total} product${preview.total === 1 ? "" : "s"} match. ${preview.already ? `${preview.already} already use this template. ` : ""}${preview.replacing ? `${preview.replacing} currently use a different template and will switch to this one. ` : ""}For example: ${preview.sample.join(", ")}${preview.total > preview.sample.length ? "…" : ""}`}
+              : `${preview.total} product${preview.total === 1 ? "" : "s"} match. ${preview.already ? `${preview.already} already use this template. ` : ""}${preview.replacing ? `${preview.replacing} currently use a different template and will switch to this one. ` : ""}${preview.noPhoto ? `${preview.noPhoto} don't have an embroidery photo yet, so the builder stays hidden on them until one is added. ` : ""}For example: ${preview.sample.join(", ")}${preview.total > preview.sample.length ? "…" : ""}`}
           </p>
         ) : null}
         {r && !r.ok && r.errors?.length ? <p className="tpe-warn">{r.errors.join(" ")}</p> : null}
@@ -636,12 +701,23 @@ function ApplySection(props: {
                     <td>
                       <input type="checkbox" aria-label={`Select ${p.title}`} checked={!!checked[p.id]} onChange={(e) => setChecked((c) => ({ ...c, [p.id]: e.target.checked }))} />
                     </td>
-                    <td>{p.image ? <img src={`${p.image}${p.image.includes("?") ? "&" : "?"}width=80`} alt="" /> : null}</td>
+                    <td>{p.hasPhoto && p.image ? <img src={`${p.image}${p.image.includes("?") ? "&" : "?"}width=80`} alt="" /> : null}</td>
                     <td>
                       {p.title}
                       {p.status !== "ACTIVE" ? <span className="tpe-tag">{p.status.toLowerCase()}</span> : null}
                     </td>
-                    <td>{ratioMismatch(props.photoRatio, p.width, p.height) ? <span className="tpe-tag is-warn">Photo shape differs</span> : null}</td>
+                    <td>
+                      {!p.hasPhoto ? (
+                        <span className="tpe-tag is-warn">No embroidery photo: builder hidden</span>
+                      ) : ratioMismatch(props.photoRatio, p.width, p.height) ? (
+                        <span className="tpe-tag is-warn">Photo shape differs</span>
+                      ) : (
+                        <span className="tpe-tag is-ok">Ready</span>
+                      )}
+                    </td>
+                    <td>
+                      <PhotoUpload productId={p.id} label={p.hasPhoto ? "Replace photo" : "Add photo"} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -671,7 +747,52 @@ function ApplySection(props: {
   );
 }
 
+// Upload an embroidery mockup photo for one product (sets its embroidery.mockup_photo metafield).
+function PhotoUpload({ productId, label }: { productId: string; label: string }) {
+  const f = useFetcher<any>();
+  const shopify = useAppBridge();
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (f.state !== "idle" || !f.data) return;
+    if (f.data.ok) shopify.toast.show("Embroidery photo saved");
+    else shopify.toast.show(f.data.error ?? "Upload failed", { isError: true });
+    if (input.current) input.current.value = "";
+  }, [f.state, f.data]);
+  return (
+    <>
+      <button type="button" className="tpe-small" disabled={f.state !== "idle"} onClick={() => input.current?.click()}>
+        {f.state !== "idle" ? "Uploading…" : label}
+      </button>
+      <input
+        ref={input}
+        type="file"
+        hidden
+        accept="image/png,image/jpeg,image/webp"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const fd = new FormData();
+          fd.append("photo", file);
+          fd.append("productId", productId);
+          f.submit(fd, { method: "post", action: "/app/api/photos", encType: "multipart/form-data" });
+        }}
+      />
+    </>
+  );
+}
+
 const EDITOR_CSS = `
+.tpe-small{font:inherit;font-size:12px;padding:3px 8px;border:1px solid #8a8a8a;border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap}
+.tpe-tag.is-ok{background:#cdfee1;color:#0c5132}
+.tpe-chooser{border:1px solid #e3e3e3;border-radius:10px;padding:12px;margin:0 0 12px;background:#fafafa;text-align:left;width:100%;box-sizing:border-box}
+.tpe-search{font:inherit;font-size:13px;padding:6px 10px;border:1px solid #8a8a8a;border-radius:8px;flex:1}
+.tpe-x{border:0;background:none;color:#005bd3;cursor:pointer;font:inherit;font-size:13px}
+.tpe-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;max-height:360px;overflow:auto}
+.tpe-photo-grid button{border:1px solid #e3e3e3;background:#fff;border-radius:8px;padding:6px;cursor:pointer;display:flex;flex-direction:column;gap:4px;font:inherit;font-size:11px;text-align:left}
+.tpe-photo-grid button:hover{border-color:#005bd3}
+.tpe-photo-grid img{width:100%;height:110px;object-fit:contain;background:#f1f1f1;border-radius:4px}
+.tpe-photo-grid span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tpe-photo-cell{display:flex;align-items:center;gap:8px}
 .tpe-steps{display:flex;flex-wrap:wrap;gap:8px 20px;list-style:none;margin:0 0 16px;padding:0;font-size:13px;color:#616161}
 .tpe-steps li{display:flex;align-items:center;gap:6px}
 .tpe-steps li span{width:22px;height:22px;border-radius:50%;background:#e3e3e3;color:#303030;display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:12px}

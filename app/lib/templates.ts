@@ -36,6 +36,9 @@ export type Template = TemplateData & { id: string; handle: string; updatedAt: s
 export const TEMPLATE_TYPE = "embroidery_location_template";
 export const MF_NAMESPACE = "embroidery";
 export const MF_KEY = "location_template";
+// The photo the builder draws on (product level, optionally per variant for each apron color).
+// It can differ from the product's gallery photos. Without it the builder doesn't show.
+export const MF_PHOTO_KEY = "mockup_photo";
 
 export const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
 

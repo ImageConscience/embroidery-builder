@@ -1,20 +1,36 @@
 {%- comment -%}
   Embroidery builder app block. Add it to the product template in the theme editor.
   Locations come from the product's location template (product metafield embroidery.location_template,
-  managed in the app under Location templates). The JSON setting is only a fallback for products without one.
+  managed in the app under Location templates), drawn on the product's embroidery mockup photo
+  (metafield embroidery.mockup_photo, product or variant). Without both, the builder doesn't show.
+  The JSON setting is only a fallback for products without a template.
   Pricing comes from the app server (/apps/embroidery/config) so checkout and the builder always match.
 {%- endcomment -%}
 {%- liquid
   assign first_variant = product.selected_or_first_available_variant
   assign main_image = first_variant.featured_image | default: product.featured_image
   assign tpl = product.metafields.embroidery.location_template.value
+  assign product_photo = product.metafields.embroidery.mockup_photo.value
+  assign has_photo = false
+  if product_photo != blank
+    assign has_photo = true
+  else
+    for v in product.variants
+      if v.metafields.embroidery.mockup_photo.value != blank
+        assign has_photo = true
+        break
+      endif
+    endfor
+  endif
   assign use_fallback = false
   if tpl == blank and block.settings.use_fallback and block.settings.zones_json != blank
     assign use_fallback = true
   endif
   assign show_builder = false
-  if product and main_image
-    if tpl != blank or use_fallback
+  if product
+    if tpl != blank and has_photo
+      assign show_builder = true
+    elsif use_fallback and main_image
       assign show_builder = true
     endif
   endif
@@ -38,7 +54,16 @@
         },
         "variants": [
           {%- for v in product.variants -%}
-            {%- assign vimg = v.featured_image | default: main_image -%}
+            {%- if tpl != blank -%}
+              {%- assign vimg = v.metafields.embroidery.mockup_photo.value | default: product_photo -%}
+              {%- if vimg == blank -%}
+                {%- for v2 in product.variants -%}
+                  {%- if v2.metafields.embroidery.mockup_photo.value != blank -%}{%- assign vimg = v2.metafields.embroidery.mockup_photo.value -%}{%- break -%}{%- endif -%}
+                {%- endfor -%}
+              {%- endif -%}
+            {%- else -%}
+              {%- assign vimg = v.featured_image | default: main_image -%}
+            {%- endif -%}
             {
               "id": {{ v.id | json }},
               "title": {{ v.title | json }},
@@ -63,8 +88,13 @@
   </div>
 {%- elsif request.design_mode and product -%}
   <p style="padding:8px 12px;border:1px dashed #b44a31;border-radius:8px;font-size:13px">
-    Embroidery builder: this product has no location template, so customers won't see the builder here.
-    Assign one in the Embroidery Builder app under Location templates.
+    {%- if tpl == blank -%}
+      Embroidery builder: this product has no location template, so customers won't see the builder here.
+      Assign one in the Embroidery Builder app under Location templates.
+    {%- else -%}
+      Embroidery builder: this product has a location template but no embroidery mockup photo, so customers won't see the builder here.
+      Add one in the app (Location templates, then the template's product list) or in the product's metafield "Embroidery mockup photo".
+    {%- endif -%}
   </p>
 {%- endif -%}
 
