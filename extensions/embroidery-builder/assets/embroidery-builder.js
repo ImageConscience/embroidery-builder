@@ -1039,7 +1039,8 @@
     var btn = root.querySelector("[data-emb-open]");
     if (btn) btn.addEventListener("click", function () { new Builder(cfg).open(); });
   }
-  function bootAll() { Array.prototype.forEach.call(document.querySelectorAll("[data-emb-root]"), boot); }
+  // The "Embroidery builder switch" app embed sets this; without it the builder stays off on this theme.
+  function bootAll() { if (!window.EmbroideryBuilderOn) return; Array.prototype.forEach.call(document.querySelectorAll("[data-emb-root]"), boot); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootAll); else bootAll();
   document.addEventListener("shopify:section:load", bootAll);
 

@@ -1,0 +1,15 @@
+{%- comment -%}
+  App embed: the master on/off switch for the embroidery builder on this theme
+  (Online Store > Themes > Customize > App embeds). When it's off, the builder button
+  stays hidden on every product page of the theme, even where the block is placed.
+{%- endcomment -%}
+<style>.emb-root[data-emb-root]{display:block}.emb-embed-off{display:none!important}</style>
+<script>window.EmbroideryBuilderOn = true;</script>
+
+{% schema %}
+{
+  "name": "Embroidery builder switch",
+  "target": "body",
+  "settings": []
+}
+{% endschema %}

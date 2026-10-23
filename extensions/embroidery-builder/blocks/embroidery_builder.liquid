@@ -36,6 +36,12 @@
   endif
 -%}
 {%- if show_builder -%}
+  {%- if request.design_mode -%}
+    <p class="emb-embed-off" style="padding:8px 12px;border:1px dashed #b44a31;border-radius:8px;font-size:13px">
+      Embroidery builder is switched off for this theme, so customers don't see it. Turn on
+      "Embroidery builder switch" in Theme settings &gt; App embeds.
+    </p>
+  {%- endif -%}
   <div class="emb-root" data-emb-root id="emb-{{ block.id }}" {{ block.shopify_attributes }}>
     <button type="button" class="emb-open" data-emb-open
       style="--emb-accent: {{ block.settings.accent_color }};">
