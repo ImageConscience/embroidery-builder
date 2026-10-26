@@ -26,7 +26,7 @@
 - Design data stored as a list of decorations (one for now; front + back later)
 
 ## Methods: next phases
-- Get from ApronWarehouse: real max print/embroidery sizes per location, stock ink color list, max ink colors, whether screen print can go on pockets, how "40 per style and color" applies to multi-color orders
+- Decided Oct 26: max sizes are set per method and location in each template; inks are matched to hex/Pantone like thread (no stock list, no Pantone surcharge by default); at most 3 colors per design by default, changeable per method and per location; screen printing is allowed anywhere a template puts it (pockets included); each customized apron color is its own order item, so DayStar's "40 per style and color" is simply the 40 minimum for that design
 - Screen print: gradient/photo detection with a suggestion to simplify the art; stock ink picker
 - Several decorations per order (e.g. embroidered chest + printed back), priced per decoration
 - "Help me choose" after upload (suggest a method from the logo's colors and detail); side-by-side price comparison

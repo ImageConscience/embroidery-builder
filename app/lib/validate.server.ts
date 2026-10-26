@@ -32,7 +32,8 @@ export async function checkDesign(admin: AdminLike, shop: string, spec: any) {
 
   const colors = Math.max(1, Math.min(30, parseInt(d?.colorCount, 10) || 1));
   const customColors = Math.max(0, Math.min(colors, parseInt(d?.customColorCount, 10) || 0));
-  const maxColors = Math.min(zone?.maxColors || Infinity, method.maxColors || Infinity);
+  // The location's own limit wins; otherwise the method default.
+  const maxColors = zone?.maxColors || method.maxColors || Infinity;
   if (colors > maxColors) return fail(`${zone?.label ?? "This location"} allows up to ${maxColors} colors for ${method.name.toLowerCase()}.`);
   // Stitches come from the builder's estimate (charged as final).
   const stitches = method.kind === "embroidery" ? Math.max(500, Number(d?.estimate?.stitches) || 0) : 0;

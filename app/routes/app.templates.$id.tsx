@@ -41,7 +41,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     .then((j: any) => ({ types: (j?.data?.productTypes?.nodes ?? []) as string[], vendors: (j?.data?.productVendors?.nodes ?? []) as string[] }))
     .catch(() => ({ types: [] as string[], vendors: [] as string[] }));
 
-  const methods = (await listMethods(session.shop)).map((m) => ({ key: m.key, name: m.name, kind: m.kind, enabled: m.enabled }));
+  const methods = (await listMethods(session.shop)).map((m) => ({ key: m.key, name: m.name, kind: m.kind, enabled: m.enabled, maxColors: m.maxColors }));
   const url = new URL(request.url);
   if (params.id === "new") {
     return { id: null, template: null, products: [] as TemplateProduct[], productsMore: false, methods, newMethod: url.searchParams.get("method") ?? "", ...lists };
@@ -149,6 +149,7 @@ export default function TemplateEditor() {
   };
   const zone = tpl.zones.find((z) => z.id === sel) ?? null;
   const methodKind = data.methods.find((m) => m.key === tpl.method)?.kind ?? "embroidery";
+  const methodMaxColors = data.methods.find((m) => m.key === tpl.method)?.maxColors ?? null;
   const setZone = (id: string, patch: Partial<Zone>) =>
     update((t) => ({ ...t, zones: t.zones.map((z) => (z.id === id ? { ...z, ...patch } : z)) }));
 
@@ -565,7 +566,7 @@ export default function TemplateEditor() {
                         </label>
                         <label className="tpe-field">
                           <span>Most colors</span>
-                          <input type="number" min="1" step="1" placeholder="No limit" value={zone.maxColors ?? ""} onChange={(e) => setZone(zone.id, { maxColors: parseInt(e.target.value, 10) || undefined })} />
+                          <input type="number" min="1" step="1" placeholder={methodMaxColors ? `Method default (${methodMaxColors})` : "No limit"} value={zone.maxColors ?? ""} onChange={(e) => setZone(zone.id, { maxColors: parseInt(e.target.value, 10) || undefined })} />
                         </label>
                       </div>
                       <div className="tpe-row">
@@ -580,7 +581,7 @@ export default function TemplateEditor() {
                           <input type="number" min="1" step="1" placeholder="Any" value={zone.qtyStep ?? ""} onChange={(e) => setZone(zone.id, { qtyStep: parseInt(e.target.value, 10) || undefined })} />
                         </label>
                       </div>
-                      <p className="tpe-note">Optional limits for this location. For example, DayStar pockets are ordered in multiples of 40.</p>
+                      <p className="tpe-note">Optional limits for this location. Leave "Most colors" empty to use the method's default (set on the Methods page). For example, DayStar pockets are ordered in multiples of 40.</p>
                     </>
                   );
                 })()}

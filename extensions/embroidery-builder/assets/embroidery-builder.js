@@ -806,7 +806,8 @@
     p.appendChild(chips);
     var zi = this.zoneInches(this.zone);
     var lim = [], z0 = this.zone;
-    if (z0.maxColors) lim.push("up to " + z0.maxColors + " color" + (z0.maxColors === 1 ? "" : "s"));
+    var mc = z0.maxColors || (this.pricing && this.pricing.maxColors);
+    if (mc) lim.push("up to " + mc + " color" + (mc === 1 ? "" : "s"));
     if (z0.maxStitches && this.isEmbroidery()) lim.push("up to " + fmtInt(z0.maxStitches) + " stitches");
     if (z0.qtyStep > 1) lim.push("ordered in multiples of " + z0.qtyStep);
     p.appendChild(el("p", { class: "emb-help" }, "Largest logo here: " + Math.min(z0.maxW || zi.w, zi.w).toFixed(1) + "″ wide × " + Math.min(z0.maxH || zi.h, zi.h).toFixed(1) + "″ tall" + (lim.length ? "; " + lim.join(", ") : "") + "."));
@@ -932,13 +933,13 @@
     var ink = !this.isEmbroidery();
     p.appendChild(el("h3", null, ink ? "Ink colors" : "Thread colors"));
     p.appendChild(el("p", { class: "emb-help" }, ink
-      ? "We suggested a hex color for each color in your logo; we'll match it to the closest stock ink. For an exact brand color, add a Pantone code (custom ink" + (this.pricing.customColorFee ? ", +" + money(this.pricing.customColorFee) + " per apron per color" : "") + ")."
+      ? "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match" + (this.pricing.customColorFee ? " (custom ink, +" + money(this.pricing.customColorFee) + " per apron per color)" : "") + "."
       : "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match. Almost any color can be matched in thread."));
     L.palette.forEach(function (c, i) {
       var row = el("div", { class: "emb-color-row" });
       var dot = el("span", { class: "emb-dot", "aria-hidden": "true" }); dot.style.background = c.hex;
       var hex = el("input", { class: "emb-input", value: c.hex, "aria-label": "Color " + (i + 1) + " hex", maxlength: "7", spellcheck: "false" });
-      var pms = el("input", { class: "emb-input", value: c.pantone, placeholder: ink ? "Pantone (custom ink)" : "Pantone (optional)", "aria-label": "Color " + (i + 1) + " Pantone", maxlength: "24" });
+      var pms = el("input", { class: "emb-input", value: c.pantone, placeholder: "Pantone (optional)", "aria-label": "Color " + (i + 1) + " Pantone", maxlength: "24" });
       hex.addEventListener("input", function () {
         var v = hex.value.trim(); if (v && v[0] !== "#") v = "#" + v;
         var ok = !!hexToRgb(v); hex.setAttribute("aria-invalid", String(!ok));
@@ -983,7 +984,7 @@
   Builder.prototype.problems = function () {
     var out = [], z = this.zone || {}, m = this.pricing;
     if (!this.logo) return out;
-    var maxC = Math.min(z.maxColors || Infinity, m.maxColors || Infinity);
+    var maxC = z.maxColors || m.maxColors || Infinity; // location limit wins over the method default
     var n = this.colorCount();
     if (n > maxC) out.push({ kind: "colors", text: esc(z.label || "This location") + " allows up to " + maxC + " color" + (maxC === 1 ? "" : "s") + " for " + esc(m.name.toLowerCase()) + "; your design has " + n + ". Give similar colors the same hex to merge them." });
     var e = this.currentEstimate();

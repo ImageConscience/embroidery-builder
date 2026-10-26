@@ -19,7 +19,7 @@ export type MethodData = {
   includedColors: number;
   perExtraColor: number;
   customColorFee: number;
-  maxColors: number | null;
+  maxColors: number | null; // default most colors on one design; a location can set its own
   leadTime: string;
   colorNote: string;
 };
@@ -52,7 +52,7 @@ export const DEFAULT_METHODS: MethodData[] = [
     includedColors: 4,
     perExtraColor: 1,
     customColorFee: 0,
-    maxColors: null,
+    maxColors: 3,
     leadTime: "10–12 business days after proof approval",
     colorNote: "Thread is matched to your hex or Pantone color.",
   },
@@ -77,7 +77,7 @@ export const DEFAULT_METHODS: MethodData[] = [
     includedColors: 4,
     perExtraColor: 1,
     customColorFee: 0,
-    maxColors: null,
+    maxColors: 3,
     leadTime: "7–10 business days after the aprons reach our decorator and the proof is approved",
     colorNote: "Thread is matched to your hex or Pantone color.",
   },
@@ -101,10 +101,10 @@ export const DEFAULT_METHODS: MethodData[] = [
     perThousandStitches: null,
     includedColors: 4,
     perExtraColor: 1,
-    customColorFee: 1,
-    maxColors: null,
+    customColorFee: 0,
+    maxColors: 3,
     leadTime: "7–10 business days after the aprons reach our decorator and the proof is approved",
-    colorNote: "Up to 4 stock ink colors included; a white underbase is added when needed at no charge. Custom Pantone inks are $1 per color per apron.",
+    colorNote: "Ink is matched to your hex or Pantone color. A white underbase is added when needed at no charge.",
   },
 ];
 

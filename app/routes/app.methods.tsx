@@ -79,7 +79,7 @@ export default function Methods() {
     includedColors: 4,
     perExtraColor: 1,
     customColorFee: 0,
-    maxColors: null,
+    maxColors: 3,
     leadTime: "",
     colorNote: "",
   };
@@ -200,14 +200,14 @@ function MethodForm({ m, isNew, busy }: { m: MethodData; isNew?: boolean; busy: 
           <input name="perExtraColor" type="number" min="0" step="0.01" defaultValue={m.perExtraColor} />
         </label>
         <label className="mt-f">
-          <span>Per custom Pantone ink, per piece ($)</span>
+          <span>Extra per Pantone ink, per piece ($)</span>
           <input name="customColorFee" type="number" min="0" step="0.01" defaultValue={m.customColorFee} />
-          <small>Screen print only</small>
+          <small>Screen print only; 0 = no extra charge</small>
         </label>
         <label className="mt-f">
-          <span>Most colors allowed</span>
+          <span>Most colors on one design</span>
           <input name="maxColors" type="number" min="1" defaultValue={m.maxColors ?? ""} placeholder="No limit" />
-          <small>Locations can set a lower limit</small>
+          <small>Default for every location; a location can set its own number</small>
         </label>
         <label className="mt-f mt-wide">
           <span>Production time shown to customers</span>
