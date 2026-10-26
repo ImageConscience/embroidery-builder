@@ -362,7 +362,7 @@
     return zones.map(function (z) {
       return {
         id: z.id, label: z.label, x: +z.x, y: +z.y, w: +z.w, h: +z.h, widthIn: +z.w * pw, maxW: +z.maxW || 0, maxH: +z.maxH || 0,
-        minW: +z.minW || 0, maxColors: +z.maxColors || 0, maxStitches: +z.maxStitches || 0, qtyStep: +z.qtyStep || 0
+        minW: +z.minW || 0, maxColors: +z.maxColors || 0, maxStitches: +z.maxStitches || 0, qtyStep: +z.qtyStep || 0, minQty: +z.minQty || 0
       };
     });
   }
@@ -493,6 +493,8 @@
   };
 
   Builder.prototype.method = function () { return this.pricing; };
+  // Minimum quantity: the location's own minimum wins over the method's.
+  Builder.prototype.minimum = function () { return (this.zone && this.zone.minQty) || this.pricing.minimum || 1; };
   Builder.prototype.isEmbroidery = function () { return this.pricing.kind !== "screen_print"; };
   Builder.prototype.showMethodStep = function () { return this.templates.length > 0 && this.availableMethods().length !== 1; };
   Builder.prototype.steps = function () {
@@ -809,6 +811,7 @@
     var mc = z0.maxColors || (this.pricing && this.pricing.maxColors);
     if (mc) lim.push("up to " + mc + " color" + (mc === 1 ? "" : "s"));
     if (z0.maxStitches && this.isEmbroidery()) lim.push("up to " + fmtInt(z0.maxStitches) + " stitches");
+    if (z0.minQty) lim.push(z0.minQty + " minimum");
     if (z0.qtyStep > 1) lim.push("ordered in multiples of " + z0.qtyStep);
     p.appendChild(el("p", { class: "emb-help" }, "Largest logo here: " + Math.min(z0.maxW || zi.w, zi.w).toFixed(1) + "″ wide × " + Math.min(z0.maxH || zi.h, zi.h).toFixed(1) + "″ tall" + (lim.length ? "; " + lim.join(", ") : "") + "."));
     if (this.showMethodStep() && this.methodKey) {
@@ -989,7 +992,8 @@
     if (n > maxC) out.push({ kind: "colors", text: esc(z.label || "This location") + " allows up to " + maxC + " color" + (maxC === 1 ? "" : "s") + " for " + esc(m.name.toLowerCase()) + "; your design has " + n + ". Give similar colors the same hex to merge them." });
     var e = this.currentEstimate();
     if (e && z.maxStitches && e.stitches > z.maxStitches) out.push({ kind: "stitches", text: "About " + fmtInt(round100(e.stitches)) + " stitches is more than " + esc(z.label || "this location") + " allows (" + fmtInt(z.maxStitches) + "). Make the logo smaller or simpler." });
-    if (this.qty < (m.minimum || 1)) out.push({ kind: "qty", text: esc(m.name) + " has a " + m.minimum + "-apron minimum." });
+    var minQ = this.minimum();
+    if (this.qty < minQ) out.push({ kind: "qty", text: z.minQty ? esc(z.label) + " has a " + minQ + "-apron minimum for " + esc(m.name.toLowerCase()) + "." : esc(m.name) + " has a " + minQ + "-apron minimum." });
     if (z.qtyStep > 1 && this.qty % z.qtyStep) out.push({ kind: "qty", text: esc(z.label || "This location") + " is ordered in multiples of " + z.qtyStep + " (for example " + Math.ceil(this.qty / z.qtyStep) * z.qtyStep + ")." });
     return out;
   };
@@ -1184,7 +1188,7 @@
         background: this.logo.bgKept ? "kept" : this.logo.bgRemoved ? "removed" : "none",
         insideAreasStitched: !!(this.logo.bgRemoved && this.logo.keepEnclosed)
       }],
-      price: { perApron: q.price.perApron, tierPrice: q.price.tier.price, setupFee: q.price.setup, total: +q.price.total.toFixed(2), belowMinimum: q.price.belowMin },
+      price: { perApron: q.price.perApron, tierPrice: q.price.tier.price, setupFee: q.price.setup, total: +q.price.total.toFixed(2), belowMinimum: this.qty < this.minimum() },
       logoFile: { name: this.logo.file.name, type: this.logo.file.type, size: this.logo.file.size }
     };
   };

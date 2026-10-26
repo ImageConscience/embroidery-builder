@@ -38,7 +38,9 @@ export async function checkDesign(admin: AdminLike, shop: string, spec: any) {
   // Stitches come from the builder's estimate (charged as final).
   const stitches = method.kind === "embroidery" ? Math.max(500, Number(d?.estimate?.stitches) || 0) : 0;
   if (zone?.maxStitches && stitches > zone.maxStitches) return fail(`That design needs more stitches than ${zone.label} allows. Try a smaller logo.`);
-  if (quantity < method.minimum) return fail(`${method.name} has a ${method.minimum}-apron minimum.`);
+  // The location's own minimum wins; otherwise the method minimum.
+  const minimum = zone?.minQty || method.minimum;
+  if (quantity < minimum) return fail(zone?.minQty ? `${zone.label} has a ${minimum}-apron minimum for ${method.name.toLowerCase()}.` : `${method.name} has a ${minimum}-apron minimum.`);
   if (zone?.qtyStep && zone.qtyStep > 1 && quantity % zone.qtyStep) return fail(`${zone.label} is ordered in multiples of ${zone.qtyStep}.`);
 
   const price = priceFor(method, { quantity, stitches, colors, customColors });

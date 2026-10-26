@@ -21,6 +21,7 @@ export type Zone = {
   maxColors?: number; // most thread/ink colors
   maxStitches?: number; // embroidery only
   qtyStep?: number; // quantity must be a multiple of this (e.g. DayStar pockets: 40)
+  minQty?: number; // minimum quantity for this location; overrides the method minimum
 };
 
 export type Calibration = { x1: number; y1: number; x2: number; y2: number; inches: number };
@@ -118,6 +119,8 @@ export function validateTemplate(input: any, methodKeys: string[]): { data: Temp
     if (maxStitches) out.maxStitches = maxStitches;
     const qtyStep = optInt(z?.qtyStep);
     if (qtyStep && qtyStep > 1) out.qtyStep = qtyStep;
+    const minQty = optInt(z?.minQty);
+    if (minQty) out.minQty = minQty;
     return out;
   });
   if (!zones.length) errors.push("Draw at least one location on the photo.");

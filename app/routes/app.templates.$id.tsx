@@ -41,7 +41,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     .then((j: any) => ({ types: (j?.data?.productTypes?.nodes ?? []) as string[], vendors: (j?.data?.productVendors?.nodes ?? []) as string[] }))
     .catch(() => ({ types: [] as string[], vendors: [] as string[] }));
 
-  const methods = (await listMethods(session.shop)).map((m) => ({ key: m.key, name: m.name, kind: m.kind, enabled: m.enabled, maxColors: m.maxColors }));
+  const methods = (await listMethods(session.shop)).map((m) => ({ key: m.key, name: m.name, kind: m.kind, enabled: m.enabled, maxColors: m.maxColors, minimum: m.minimum }));
   const url = new URL(request.url);
   if (params.id === "new") {
     return { id: null, template: null, products: [] as TemplateProduct[], productsMore: false, methods, newMethod: url.searchParams.get("method") ?? "", ...lists };
@@ -150,6 +150,7 @@ export default function TemplateEditor() {
   const zone = tpl.zones.find((z) => z.id === sel) ?? null;
   const methodKind = data.methods.find((m) => m.key === tpl.method)?.kind ?? "embroidery";
   const methodMaxColors = data.methods.find((m) => m.key === tpl.method)?.maxColors ?? null;
+  const methodMinimum = data.methods.find((m) => m.key === tpl.method)?.minimum ?? null;
   const setZone = (id: string, patch: Partial<Zone>) =>
     update((t) => ({ ...t, zones: t.zones.map((z) => (z.id === id ? { ...z, ...patch } : z)) }));
 
@@ -577,11 +578,15 @@ export default function TemplateEditor() {
                           </label>
                         ) : null}
                         <label className="tpe-field">
+                          <span>Minimum quantity</span>
+                          <input type="number" min="1" step="1" placeholder={methodMinimum ? `Method default (${methodMinimum})` : "Method default"} value={zone.minQty ?? ""} onChange={(e) => setZone(zone.id, { minQty: parseInt(e.target.value, 10) || undefined })} />
+                        </label>
+                        <label className="tpe-field">
                           <span>Quantity in multiples of</span>
                           <input type="number" min="1" step="1" placeholder="Any" value={zone.qtyStep ?? ""} onChange={(e) => setZone(zone.id, { qtyStep: parseInt(e.target.value, 10) || undefined })} />
                         </label>
                       </div>
-                      <p className="tpe-note">Optional limits for this location. Leave "Most colors" empty to use the method's default (set on the Methods page). For example, DayStar pockets are ordered in multiples of 40.</p>
+                      <p className="tpe-note">Optional limits for this location. Leave "Most colors" or "Minimum quantity" empty to use the method's default (set on the Methods page). For example, DayStar pockets are ordered in multiples of 40.</p>
                     </>
                   );
                 })()}
