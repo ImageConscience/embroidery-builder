@@ -6,6 +6,7 @@ import { createCheckout } from "../lib/checkout.server";
 import { checkDesign } from "../lib/validate.server";
 import { firstDecoration } from "../lib/spec";
 import { addEvent, customerLink, newToken } from "../lib/design.server";
+import { adminDesignLink, notify, raiseAlert, slackLink } from "../lib/notify.server";
 
 // Storefront submission: POST https://<shop>/apps/imprint/submit (multipart form).
 // Saves the design, then creates a draft order priced on the server and returns its checkout link.
@@ -25,7 +26,19 @@ function str(v: FormDataEntryValue | null, max = 500) {
 
 export const loader = () => bad("Use POST", 405);
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = async (args: ActionFunctionArgs) => {
+  try {
+    return await submit(args);
+  } catch (e) {
+    if (e instanceof Response) throw e; // app proxy signature check
+    const shop = new URL(args.request.url).searchParams.get("shop") ?? "";
+    console.error(`[submit ${shop}] unexpected error`, e);
+    if (shop) await raiseAlert(shop, { kind: "submit_error", message: "A customer's design couldn't be submitted (unexpected error).", detail: e });
+    return bad("Something went wrong on our side. Please try again, or contact us if it keeps happening.", 500);
+  }
+};
+
+async function submit({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.public.appProxy(request);
   if (!session || !admin) return bad("This store hasn't finished installing the app.", 503);
 
@@ -97,6 +110,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Files go to Shopify Files; if that fails, keep the bytes in the database instead.
   const update: Record<string, unknown> = {};
+  const failedUploads: string[] = [];
   {
     try {
       update.logoFileId = await uploadToShopifyFiles(
@@ -106,6 +120,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     } catch (e) {
       console.error(`[${ref}] logo upload failed`, e);
+      failedUploads.push("logo");
       update.logoData = Buffer.from(logoBytes);
     }
     if (mockupBytes) {
@@ -117,6 +132,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
       } catch (e) {
         console.error(`[${ref}] mockup upload failed`, e);
+        failedUploads.push("mockup");
         update.mockupData = Buffer.from(mockupBytes);
       }
     }
@@ -129,6 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
       } catch (e) {
         console.error(`[${ref}] artwork upload failed`, e);
+        failedUploads.push("artwork");
         update.artworkData = Buffer.from(artworkBytes);
       }
     }
@@ -164,9 +181,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.error(`[${ref}] checkout creation failed`, e);
     update.status = "checkout_failed";
     await prisma.submission.update({ where: { id: sub.id }, data: update });
+    await raiseAlert(session.shop, {
+      kind: "checkout_failed",
+      message: `${ref}: checkout couldn't be created for ${name || email || "a customer"}. The design is saved; the customer was asked to contact you.`,
+      detail: e,
+      submissionId: sub.id,
+    });
     return bad(`We saved your design (${ref}) but couldn't start checkout. Please contact us and mention ${ref}.`, 502);
   }
   await prisma.submission.update({ where: { id: sub.id }, data: update });
+  if (failedUploads.length) {
+    await raiseAlert(session.shop, {
+      kind: "upload_failed",
+      message: `${ref}: the ${failedUploads.join(", ")} couldn't be saved to Shopify Files, so the app kept a copy in its own database. Nothing is lost.`,
+      submissionId: sub.id,
+    });
+  }
+  await notify(
+    session.shop,
+    "new",
+    `:sparkles: New design ${slackLink(adminDesignLink(session.shop, sub.id), ref)}: ${quantity} × ${spec?.product?.title ?? "apron"}${spec?.variant?.title ? ` (${spec.variant.title})` : ""}, ${method.name}, ${deco.zone?.label ?? ""}, $${price.total.toFixed(2)}${name || email ? ` from ${name || email}` : ""}. Not paid yet.`,
+  );
 
   return Response.json({ ok: true, reference: ref, checkoutUrl, designUrl });
-};
+}

@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { draftOrderStatus } from "../lib/checkout.server";
 import { addEvent, fileLinks, stageLabel } from "../lib/design.server";
 import { firstDecoration } from "../lib/spec";
+import { adminDesignLink, notify, slackLink } from "../lib/notify.server";
 
 // The customer's design page: https://<shop>/apps/imprint/design/<token>
 // Rendered by the store theme (Liquid response through the app proxy). Shows the mockup or proof,
@@ -162,21 +163,26 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = String(form.get("intent") || "");
   const body = String(form.get("body") || "").trim().slice(0, 5000);
+  const link = slackLink(adminDesignLink(s.shop, s.id), `EMB-${s.number}`);
+  const quote = (t: string) => t.slice(0, 300).replace(/[<>&]/g, " ").replace(/\n/g, " ");
 
   if (intent === "approve" && s.stage === "proof_sent" && form.get("confirm") === "yes") {
     await prisma.submission.update({ where: { id: s.id }, data: { stage: "approved", approvedAt: new Date(), attention: true } });
     await addEvent(s.id, "Customer approved the proof.", "customer");
+    await notify(s.shop, "reply", `:white_check_mark: ${link} approved: the customer approved the proof. Ready for production.`);
     return back("approved");
   }
   if (intent === "changes" && body) {
     await prisma.message.create({ data: { submissionId: s.id, kind: "message", author: "customer", body: `Change request: ${body}` } });
     await prisma.submission.update({ where: { id: s.id }, data: { stage: "changes_requested", attention: true } });
     await addEvent(s.id, "Customer asked for changes.", "customer");
+    await notify(s.shop, "reply", `:pencil2: ${link}: the customer asked for changes: "${quote(body)}"`);
     return back("changes");
   }
   if (intent === "message" && body) {
     await prisma.message.create({ data: { submissionId: s.id, kind: "message", author: "customer", body } });
     await prisma.submission.update({ where: { id: s.id }, data: { attention: true } });
+    await notify(s.shop, "reply", `:speech_balloon: ${link}: new message from the customer: "${quote(body)}"`);
     return back("message");
   }
   return back("none");

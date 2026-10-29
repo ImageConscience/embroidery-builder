@@ -33,7 +33,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ];
   }
 
-  const [rows, grouped, attention] = await Promise.all([
+  const [rows, grouped, attention, problems] = await Promise.all([
     prisma.submission.findMany({
       where,
       orderBy: [{ attention: "desc" }, { createdAt: "desc" }],
@@ -46,6 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
     prisma.submission.groupBy({ by: ["stage"], where: { shop: session.shop }, _count: { _all: true } }),
     prisma.submission.count({ where: { shop: session.shop, attention: true } }),
+    prisma.alert.count({ where: { shop: session.shop, resolvedAt: null } }).catch(() => 0),
   ]);
 
   // Payment status from the draft orders (paid = checkout completed into an order).
@@ -75,6 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     tab,
     q,
+    problems,
     counts,
     rows: rows.map((r) => {
       const sp = (r.spec ?? {}) as any;
@@ -108,7 +110,7 @@ const TONE: Record<string, string> = Object.fromEntries(STAGES.map((s) => [s.id,
 const money = (n: number | null) => (n == null ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD" }));
 
 export default function DesignCenter() {
-  const { rows, counts, tab, q } = useLoaderData<typeof loader>();
+  const { rows, counts, tab, q, problems } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
   const tabs = [
     { id: "open", label: "Open" },
@@ -124,6 +126,12 @@ export default function DesignCenter() {
 
   return (
     <s-page heading="Design center">
+      {problems ? (
+        <div className="dc-alert" role="alert">
+          <strong>{problems} problem{problems === 1 ? "" : "s"} need{problems === 1 ? "s" : ""} a look</strong>, for example a checkout that couldn't be created.{" "}
+          <Link to="/app/settings#problems">See problems</Link>
+        </div>
+      ) : null}
       <div className="dc-bar">
         <nav className="dc-tabs" aria-label="Filter designs">
           {tabs.map((t) => (
@@ -182,6 +190,8 @@ export default function DesignCenter() {
         </div>
       )}
       <style>{`
+        .dc-alert{background:#fee9e8;color:#5e1508;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px}
+        .dc-alert a{color:#5e1508;font-weight:600}
         .dc-bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
         .dc-tabs{display:flex;flex-wrap:wrap;gap:6px}
         .dc-tabs a{display:inline-flex;gap:6px;align-items:center;padding:6px 10px;border-radius:8px;color:#303030;text-decoration:none;font-size:13px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.08)}

@@ -122,3 +122,26 @@ model Method {
 
   @@unique([shop, key])
 }
+
+// Per-shop app settings (notifications).
+model ShopSettings {
+  shop         String   @id
+  slackWebhook String? // Slack incoming webhook: new designs, customer replies and problems are posted here
+  notifyNew    Boolean  @default(true)
+  notifyReply  Boolean  @default(true)
+  updatedAt    DateTime @default(now()) @updatedAt
+}
+
+// Something went wrong that staff should know about (checkout couldn't be created, a file had to be kept in the database…).
+model Alert {
+  id           String    @id @default(cuid())
+  shop         String
+  createdAt    DateTime  @default(now())
+  kind         String // checkout_failed, upload_failed, submit_error, notify_failed
+  message      String
+  detail       String?
+  submissionId String?
+  resolvedAt   DateTime?
+
+  @@index([shop, resolvedAt, createdAt])
+}

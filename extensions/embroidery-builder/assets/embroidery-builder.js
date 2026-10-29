@@ -723,6 +723,11 @@
       b.addEventListener("click", function () { self.go(i); });
       self.nav.appendChild(b);
     });
+    // On narrow screens the step pills scroll sideways: keep the current one in view.
+    var curPill = this.nav.querySelector('[aria-current="step"]');
+    if (curPill && this.nav.scrollWidth > this.nav.clientWidth) {
+      this.nav.scrollLeft = Math.max(0, curPill.offsetLeft - (this.nav.clientWidth - curPill.offsetWidth) / 2);
+    }
     var back = this.modal.querySelector("[data-back]"), next = this.modal.querySelector("[data-next]");
     back.style.visibility = this.step === 0 ? "hidden" : "visible";
     next.style.visibility = this.step >= steps.length - 1 ? "hidden" : "visible";

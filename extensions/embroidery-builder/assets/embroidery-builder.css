@@ -17,6 +17,9 @@
 @media (max-width:860px){.emb-body{grid-template-columns:1fr;overflow:auto}}
 .emb-stage{position:relative;background:#EFE9DD;display:flex;align-items:center;justify-content:center;padding:16px;min-height:360px}
 .emb-stage canvas{max-width:100%;max-height:72vh;touch-action:none;display:block}
+/* Phones: keep the photo to about a third of the screen so the choices below stay visible. */
+@media (max-width:860px){.emb-stage{min-height:0;padding:8px}.emb-stage canvas{max-height:36vh}}
+@media (max-width:860px) and (orientation:landscape){.emb-stage canvas{max-height:55vh}}
 .emb-panel{display:flex;flex-direction:column;gap:14px;padding:20px;overflow-y:auto;border-left:1px solid #E6DFD2}
 @media (max-width:860px){.emb-panel{border-left:0;border-top:1px solid #E6DFD2}}
 .emb-panel h3{margin:0;font-size:17px}
