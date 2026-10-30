@@ -5,7 +5,7 @@
 
   Themes without app blocks (older "vintage" themes) can't hold the Imprint Customizer block.
   For those, turn on "Place automatically on product pages": the embed adds the builder button
-  next to the product form (or any element you name). If the block is also placed, the block wins.
+  right below the add-to-cart / buy-it-now buttons (or next to any element you name). If the block is also placed, the block wins.
 {%- endcomment -%}
 <style>.emb-root[data-emb-root]{display:block}.emb-embed-off{display:none!important}</style>
 <script>window.EmbroideryBuilderOn = true;</script>
@@ -41,8 +41,8 @@
       "type": "text",
       "id": "place_selector",
       "label": "Place it next to (CSS selector)",
-      "info": "The first matching element on the product page. Default: the add-to-cart form.",
-      "default": "form[action*='/cart/add']"
+      "info": "Leave empty to place it right below the add-to-cart and buy-it-now buttons. Or enter a CSS selector; the first match on the product page is used.",
+      "placeholder": "Below the buy buttons"
     },
     {
       "type": "select",

@@ -254,7 +254,8 @@
         var thumbKept = cv.toDataURL("image/png");
         // Find a plain background on a copy, so the customer can choose to remove it or keep it.
         var probe = new ImageData(new Uint8ClampedArray(data.data), w, h);
-        var bgInfo = removeBackground(probe, w, h, !!opts.keepEnclosed);
+        var keepIn = opts.keepEnclosed !== false; // inner areas (letters, rings) stay stitched unless the customer unticks it
+        var bgInfo = removeBackground(probe, w, h, keepIn);
         var thumbRemoved = null;
         if (bgInfo) { cx.putImageData(probe, 0, 0); thumbRemoved = cv.toDataURL("image/png"); }
         var keepBg = !!(opts.keepBackground && bgInfo);
@@ -286,7 +287,7 @@
         resolve({
           file: file, w: tw, h: th, labels: labels, alpha: alpha, mask: mask, dist: dist, edges: edges,
           opaque: q.opaque, palette: q.palette, bgDetected: !!bgInfo, bgRemoved: !!bgInfo && !keepBg, bgKept: keepBg,
-          bg: bgInfo && bgInfo.bg, enclosed: bgInfo && !keepBg ? bgInfo.enclosed : 0, keepEnclosed: !!opts.keepEnclosed,
+          bg: bgInfo && bgInfo.bg, enclosed: bgInfo && !keepBg ? bgInfo.enclosed : 0, keepEnclosed: keepIn,
           thumb: thumb, thumbKept: thumbKept, thumbRemoved: thumbRemoved,
           naturalW: nw, naturalH: nh, lowRes: !/svg/i.test(file.type) && Math.max(nw, nh) < 500
         });
@@ -847,14 +848,14 @@
       if (L.bgRemoved) badges += '<span class="emb-badge">Background removed</span>';
       if (L.bgKept) badges += '<span class="emb-badge">Background kept</span>';
       if (!L.lowRes) badges += '<span class="emb-badge">Resolution OK</span>';
+      if (L.bgDetected) this.backgroundChoice(p);
       p.appendChild(el("div", { class: "emb-file" },
         '<img alt="" src="' + L.thumb + '"><div><p><strong>' + esc(L.file.name) + '</strong></p>' +
         '<p class="emb-help">' + L.naturalW + " × " + L.naturalH + " px · " + L.palette.length + " color" + (L.palette.length === 1 ? "" : "s") + " detected</p>" + badges + "</div>"));
-      if (L.bgDetected) this.backgroundChoice(p);
       if (L.bgRemoved && (L.enclosed > L.opaque * 0.005 || L.keepEnclosed)) {
         var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : rgbToHex(L.bg);
         var keep = el("label", { class: "emb-check" }, '<input type="checkbox"' + (L.keepEnclosed ? " checked" : "") + '><span>Stitch the ' + esc(bgName) +
-          " areas inside my logo. Leave this off if those areas should show the apron fabric.</span>");
+          " areas inside my logo (like letters). Untick this if those areas should show the apron fabric, like the hole in a ring.</span>");
         keep.querySelector("input").addEventListener("change", function (e) { self.handleFile(L.file, { keepEnclosed: e.target.checked, keepBackground: L.bgKept, keepPlace: true }); });
         p.appendChild(keep);
       }
@@ -868,7 +869,7 @@
   Builder.prototype.backgroundChoice = function (p) {
     var self = this, L = this.logo;
     var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : rgbToHex(L.bg);
-    var box = el("fieldset", { class: "emb-bgchoice" }, "<legend class='emb-label'>Your logo has a plain " + esc(bgName) + " background</legend>");
+    var box = el("fieldset", { class: "emb-bgchoice" }, "<legend class='emb-label'>Your logo has a plain " + esc(bgName) + " background. Remove it or keep it?</legend>");
     [
       { keep: false, title: "Remove the background", text: "Only the logo is stitched. The apron shows around it.", img: L.thumbRemoved },
       { keep: true, title: "Keep the background", text: "The background is stitched as a solid block. Choose this if it's part of your design.", img: L.thumbKept }
@@ -885,6 +886,17 @@
     });
     p.appendChild(box);
     if (L.bgKept) p.appendChild(el("p", { class: "emb-warn" }, "A stitched background is a large filled area, so it adds stitches and counts as a thread color. You'll see the effect on the price step."));
+  };
+
+  // One-line reminder on later steps, so the background choice can still be changed.
+  Builder.prototype.backgroundLine = function (p) {
+    var self = this, L = this.logo;
+    if (!L || !L.bgDetected) return;
+    var line = el("p", { class: "emb-help emb-bgline" }, (L.bgKept ? "Background kept as part of the design. " : "Background removed. "));
+    var b = el("button", { type: "button", class: "emb-link" }, L.bgKept ? "Remove it instead" : "Keep it instead");
+    b.addEventListener("click", function () { self.handleFile(L.file, { keepBackground: !L.bgKept, keepEnclosed: L.keepEnclosed, keepPlace: true }); });
+    line.appendChild(b);
+    p.appendChild(line);
   };
 
   Builder.prototype.handleFile = function (file, opts) {
@@ -935,6 +947,7 @@
     row.appendChild(center); row.appendChild(reset);
     p.appendChild(row);
     p.appendChild(el("p", { class: "emb-ok", "data-est-line": "" }, this.estimateSummary(this.currentEstimate())));
+    this.backgroundLine(p);
     this.problemsBox(p, ["stitches"]);
     this.contrastWarning(p);
   };
@@ -946,6 +959,7 @@
     p.appendChild(el("p", { class: "emb-help" }, ink
       ? "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match" + (this.pricing.customColorFee ? " (custom ink, +" + money(this.pricing.customColorFee) + " per apron per color)" : "") + "."
       : "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match. Almost any color can be matched in thread."));
+    this.backgroundLine(p);
     L.palette.forEach(function (c, i) {
       var row = el("div", { class: "emb-color-row" });
       var dot = el("span", { class: "emb-dot", "aria-hidden": "true" }); dot.style.background = c.hex;
@@ -1247,6 +1261,19 @@
     if (btn) btn.addEventListener("click", function () { new Builder(cfg).open(); });
   }
   // The "Imprint Customizer switch" app embed sets this; without it the builder stays off on this theme.
+  // The buy buttons on a product page: the dynamic checkout buttons if the theme shows them, else the
+  // add-to-cart button (its wrapper inside the form). Placing right after them keeps the customizer
+  // next to the buttons even when other apps add tables or widgets after the form.
+  function buyButtons() {
+    var form = document.querySelector("form[action*='/cart/add']");
+    if (!form) return null;
+    var pay = form.querySelector(".shopify-payment-button");
+    var add = form.querySelector("[name='add'], button[type='submit'], input[type='submit']");
+    var last = pay || add;
+    if (!last) return form;
+    while (last.parentElement && last.parentElement !== form) last = last.parentElement;
+    return last;
+  }
   // Roots placed by the app embed (themes without app blocks) move next to the product form.
   // If the theme also has the app block, the block wins and the embed's copy is removed.
   function placeAutoRoots() {
@@ -1257,10 +1284,11 @@
       if (hasBlock) { root.parentNode.removeChild(root); return; }
       if (root.__embPlaced) return;
       root.__embPlaced = true;
-      var target = null;
-      try { target = document.querySelector(root.getAttribute("data-emb-auto") || "form[action*='/cart/add']"); } catch (e) { target = null; }
+      var sel = (root.getAttribute("data-emb-auto") || "").trim(), target = null, pos = root.getAttribute("data-emb-auto-pos");
+      if (!sel || sel === "auto" || sel === "form[action*='/cart/add']") { target = buyButtons(); pos = "after"; }
+      else { try { target = document.querySelector(sel); } catch (e) { target = null; } }
       if (!target) return; // leave it where the embed rendered it
-      if (root.getAttribute("data-emb-auto-pos") === "before") target.parentNode.insertBefore(root, target);
+      if (pos === "before") target.parentNode.insertBefore(root, target);
       else target.parentNode.insertBefore(root, target.nextSibling);
     });
   }
