@@ -1,5 +1,9 @@
 /* Hidden unless the "Imprint Customizer switch" app embed is on for this theme. */
 .emb-root[data-emb-root]{display:none}
+/* Full width: the container spans its row too (themes often put the buy buttons in a flex row or a narrow column). */
+.emb-root.emb-root--full[data-emb-root]{width:100%;max-width:100%;flex:0 0 100%;box-sizing:border-box}
+.emb-root.emb-root--full .emb-open{width:100%}
+.emb-root.emb-root--fit .emb-open{width:auto}
 .emb-open{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin:12px 0;padding:var(--emb-btn-pad,12px) 20px;border:var(--emb-btn-bw,0) solid var(--emb-btn-bc,transparent);border-radius:var(--emb-btn-radius,8px);background:var(--emb-btn-bg,var(--emb-accent,#B44A31));color:var(--emb-btn-fg,#fff);font:inherit;font-family:var(--emb-btn-font,inherit);font-size:var(--emb-btn-fs,inherit);font-weight:var(--emb-btn-weight,700);text-transform:var(--emb-btn-case,none);letter-spacing:.01em;line-height:1.2;cursor:pointer;box-sizing:border-box}
 .emb-open--fit{width:auto}
 .emb-open:hover{filter:brightness(.95)}

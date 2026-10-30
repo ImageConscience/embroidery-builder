@@ -46,7 +46,9 @@
       "Imprint Customizer switch" in Theme settings &gt; App embeds.
     </p>
   {%- endif -%}
-  <div class="emb-root" data-emb-root id="emb-{{ root_id }}"{% if auto_place %} data-emb-auto="{{ place_selector | escape }}" data-emb-auto-pos="{{ place_position | default: 'before' }}"{% endif %} {{ root_attrs }}>
+  {%- assign root_full = true -%}
+  {%- if s.full_width == false -%}{%- assign root_full = false -%}{%- endif -%}
+  <div class="emb-root {% if root_full %}emb-root--full{% else %}emb-root--fit{% endif %}" data-emb-root id="emb-{{ root_id }}"{% if auto_place %} data-emb-auto="{{ place_selector | escape }}" data-emb-auto-pos="{{ place_position | default: 'before' }}"{% endif %} {{ root_attrs }}>
     {%- liquid
       assign b_bg = s.accent_color | default: accent_color | default: '#B44A31'
       assign b_fg = s.text_color | default: '#FFFFFF'
