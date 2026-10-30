@@ -968,7 +968,7 @@
     this.refreshColorLine();
     this.problemsBox(p, ["colors"]);
     p.appendChild(el("p", { class: "emb-help" }, (this.pricing.colorNote ? esc(this.pricing.colorNote) + " " : "") +
-      (ink ? "Exact matches aren't guaranteed, and screens show color differently." : "Thread is matched to your hex or Pantone when the design is digitized. Exact matches aren't guaranteed, and screens show color differently.")));
+      (ink || this.pricing.colorNote ? "Exact matches aren't guaranteed, and screens show color differently." : "Thread is matched to your hex or Pantone when the design is digitized. Exact matches aren't guaranteed, and screens show color differently.")));
   };
 
   Builder.prototype.refreshColorLine = function () {
