@@ -2,14 +2,70 @@
   App embed: the master on/off switch for Imprint Customizer on this theme
   (Online Store > Themes > Customize > App embeds). When it's off, the builder button
   stays hidden on every product page of the theme, even where the block is placed.
+
+  Themes without app blocks (older "vintage" themes) can't hold the Imprint Customizer block.
+  For those, turn on "Place automatically on product pages": the embed adds the builder button
+  next to the product form (or any element you name). If the block is also placed, the block wins.
 {%- endcomment -%}
 <style>.emb-root[data-emb-root]{display:block}.emb-embed-off{display:none!important}</style>
 <script>window.EmbroideryBuilderOn = true;</script>
+{%- if block.settings.auto_place and template.name == 'product' and product -%}
+  {%- render 'imprint_builder',
+    root_id: 'auto',
+    root_attrs: '',
+    button_label: block.settings.button_label,
+    accent_color: block.settings.accent_color,
+    use_fallback_setting: false,
+    zones_json: '',
+    auto_place: true,
+    place_selector: block.settings.place_selector,
+    place_position: block.settings.place_position
+  -%}
+{%- endif -%}
 
 {% schema %}
 {
   "name": "Imprint Customizer switch",
   "target": "body",
-  "settings": []
+  "javascript": "embroidery-builder.js",
+  "stylesheet": "embroidery-builder.css",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "auto_place",
+      "label": "Place automatically on product pages",
+      "info": "For themes that can't hold app blocks. Shows the builder button on products with a location template and mockup photo.",
+      "default": false
+    },
+    {
+      "type": "text",
+      "id": "place_selector",
+      "label": "Place it next to (CSS selector)",
+      "info": "The first matching element on the product page. Default: the add-to-cart form.",
+      "default": "form[action*='/cart/add']"
+    },
+    {
+      "type": "select",
+      "id": "place_position",
+      "label": "Position",
+      "options": [
+        { "value": "before", "label": "Before it" },
+        { "value": "after", "label": "After it" }
+      ],
+      "default": "after"
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Button label",
+      "default": "Customize with your logo"
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#B44A31"
+    }
+  ]
 }
 {% endschema %}

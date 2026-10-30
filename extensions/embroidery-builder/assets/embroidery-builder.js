@@ -1,6 +1,9 @@
 /* Imprint Customizer builder (storefront). Vanilla JS, no dependencies.
    Steps: apron + location, upload, place + size, colors, price, review + submit. */
 (function () {
+  // Loaded by the app block and/or the app embed: run once.
+  if (window.__imprintCustomizerLoaded) return;
+  window.__imprintCustomizerLoaded = true;
   "use strict";
 
   // Used only for the fallback JSON locations (products without a location template).
@@ -1244,7 +1247,24 @@
     if (btn) btn.addEventListener("click", function () { new Builder(cfg).open(); });
   }
   // The "Imprint Customizer switch" app embed sets this; without it the builder stays off on this theme.
-  function bootAll() { if (!window.EmbroideryBuilderOn) return; Array.prototype.forEach.call(document.querySelectorAll("[data-emb-root]"), boot); }
+  // Roots placed by the app embed (themes without app blocks) move next to the product form.
+  // If the theme also has the app block, the block wins and the embed's copy is removed.
+  function placeAutoRoots() {
+    var autos = document.querySelectorAll("[data-emb-root][data-emb-auto]");
+    if (!autos.length) return;
+    var hasBlock = document.querySelector("[data-emb-root]:not([data-emb-auto])");
+    Array.prototype.forEach.call(autos, function (root) {
+      if (hasBlock) { root.parentNode.removeChild(root); return; }
+      if (root.__embPlaced) return;
+      root.__embPlaced = true;
+      var target = null;
+      try { target = document.querySelector(root.getAttribute("data-emb-auto") || "form[action*='/cart/add']"); } catch (e) { target = null; }
+      if (!target) return; // leave it where the embed rendered it
+      if (root.getAttribute("data-emb-auto-pos") === "before") target.parentNode.insertBefore(root, target);
+      else target.parentNode.insertBefore(root, target.nextSibling);
+    });
+  }
+  function bootAll() { if (!window.EmbroideryBuilderOn) return; placeAutoRoots(); Array.prototype.forEach.call(document.querySelectorAll("[data-emb-root]"), boot); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootAll); else bootAll();
   document.addEventListener("shopify:section:load", bootAll);
 
