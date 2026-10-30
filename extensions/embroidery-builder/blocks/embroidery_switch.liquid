@@ -13,7 +13,7 @@
   {%- render 'imprint_builder',
     root_id: 'auto',
     root_attrs: '',
-    button_label: block.settings.button_label,
+    s: block.settings,
     accent_color: block.settings.accent_color,
     use_fallback_setting: false,
     zones_json: '',
@@ -49,22 +49,148 @@
       "id": "place_position",
       "label": "Position",
       "options": [
-        { "value": "before", "label": "Before it" },
-        { "value": "after", "label": "After it" }
+        {
+          "value": "before",
+          "label": "Before it"
+        },
+        {
+          "value": "after",
+          "label": "After it"
+        }
       ],
       "default": "after"
     },
     {
+      "type": "header",
+      "content": "Customize button"
+    },
+    {
       "type": "text",
       "id": "button_label",
-      "label": "Button label",
+      "label": "Label",
       "default": "Customize with your logo"
+    },
+    {
+      "type": "select",
+      "id": "button_style",
+      "label": "Style",
+      "options": [
+        {
+          "value": "filled",
+          "label": "Filled"
+        },
+        {
+          "value": "outline",
+          "label": "Outline"
+        }
+      ],
+      "default": "filled"
     },
     {
       "type": "color",
       "id": "accent_color",
-      "label": "Accent color",
+      "label": "Button color",
+      "info": "Fill color (or text and outline color for the outline style). Also the accent color inside the customizer.",
       "default": "#B44A31"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "Text color",
+      "info": "For the filled style.",
+      "default": "#FFFFFF"
+    },
+    {
+      "type": "range",
+      "id": "border_width",
+      "label": "Outline width",
+      "min": 0,
+      "max": 4,
+      "step": 1,
+      "unit": "px",
+      "default": 0
+    },
+    {
+      "type": "color",
+      "id": "border_color",
+      "label": "Outline color",
+      "default": "#B44A31"
+    },
+    {
+      "type": "range",
+      "id": "border_radius",
+      "label": "Corner radius",
+      "min": 0,
+      "max": 40,
+      "step": 1,
+      "unit": "px",
+      "default": 8
+    },
+    {
+      "type": "select",
+      "id": "font_source",
+      "label": "Font",
+      "options": [
+        {
+          "value": "theme",
+          "label": "Same as the store"
+        },
+        {
+          "value": "custom",
+          "label": "Choose a font"
+        }
+      ],
+      "default": "theme"
+    },
+    {
+      "type": "font_picker",
+      "id": "button_font",
+      "label": "Button font",
+      "info": "Used when Font is set to Choose a font.",
+      "default": "helvetica_n7"
+    },
+    {
+      "type": "range",
+      "id": "font_size",
+      "label": "Font size",
+      "min": 12,
+      "max": 28,
+      "step": 1,
+      "unit": "px",
+      "default": 16
+    },
+    {
+      "type": "select",
+      "id": "text_case",
+      "label": "Letter case",
+      "options": [
+        {
+          "value": "none",
+          "label": "As typed"
+        },
+        {
+          "value": "uppercase",
+          "label": "ALL CAPS"
+        }
+      ],
+      "default": "none"
+    },
+    {
+      "type": "range",
+      "id": "padding",
+      "label": "Height (padding)",
+      "min": 6,
+      "max": 24,
+      "step": 1,
+      "unit": "px",
+      "default": 12
+    },
+    {
+      "type": "checkbox",
+      "id": "full_width",
+      "label": "Full width",
+      "info": "Off: the button is only as wide as its label.",
+      "default": true
     }
   ]
 }

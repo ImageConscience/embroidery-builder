@@ -29,7 +29,7 @@
     fillPerSqIn: 1800, satinPerSqIn: 1100, runPerIn: 12, perColor: 60, base: 150,
     satinMaxWidthIn: 0.25, uncertainty: 0.2
   };
-  var STEP_NAMES = ["Apron & spot", "Upload", "Place & size", "Colors", "Price", "Checkout"];
+  var STEP_NAMES = ["Logo & color", "Location", "Size & position", "Colors", "Price", "Checkout"];
   var PREVIEW_TYPES = /^image\/(png|jpe?g|svg\+xml|webp|gif)$/i;
   var MAX_FILE = 20 * 1024 * 1024;
   var PROC_MAX = 700;
@@ -393,6 +393,7 @@
     var vs = cfg.variants || [];
     this.variant = vs.filter(function (v) { return v.id === cfg.selectedVariantId; })[0] || vs[0];
     this.zone = this.zones[0];
+    this.zoneChosen = false; // the customer picks the location after uploading the logo
     this.step = 0;
     this.logo = null;
     this.logoCanvas = null;
@@ -489,7 +490,9 @@
     this.methodKey = key;
     this.pricing = merge(DEFAULT_PRICING, m);
     this.zones = t.zones;
-    this.zone = this.zones.filter(function (z) { return z.label === prev; })[0] || this.zones[0];
+    var same = this.zones.filter(function (z) { return z.label === prev; })[0];
+    this.zone = same || this.zones[0];
+    if (!same) this.zoneChosen = false;
     this.place = {};
     this.estKey = null;
     this.qty = Math.max(this.qty, this.pricing.minimum || 1);
@@ -502,7 +505,7 @@
   Builder.prototype.isEmbroidery = function () { return this.pricing.kind !== "screen_print"; };
   Builder.prototype.showMethodStep = function () { return this.templates.length > 0 && this.availableMethods().length !== 1; };
   Builder.prototype.steps = function () {
-    var names = STEP_NAMES.slice(), fns = [this.stepApron, this.stepUpload, this.stepPlace, this.stepColors, this.stepPrice, this.stepSubmit];
+    var names = STEP_NAMES.slice(), fns = [this.stepLogo, this.stepLocation, this.stepPlace, this.stepColors, this.stepPrice, this.stepSubmit];
     if (this.showMethodStep()) { names.unshift("Method"); fns.unshift(this.stepMethod); }
     return names.map(function (n, i) { return { name: n, fn: fns[i] }; });
   };
@@ -532,8 +535,9 @@
     if (!s) return false;
     if (s.name === "Method") return true;
     if (!this.methodKey) return false;
-    if (s.name === "Apron & spot" || s.name === "Upload") return true;
-    return !!this.logo;
+    if (s.name === "Logo & color") return true;
+    if (s.name === "Location") return !!this.logo;
+    return !!this.logo && this.zoneChosen;
   };
 
   Builder.prototype.go = function (i) {
@@ -592,24 +596,40 @@
     var cx = cv.getContext("2d");
     cx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx.clearRect(0, 0, W, H);
+    var stepNow = this.stepName();
+    // Size & position: zoom into the chosen location so the logo is easy to see.
+    var k = 1, tx = 0, ty = 0;
+    if (!exporting && stepNow === "Size & position" && this.zone && this.zoneChosen) {
+      var zr = this.zoneRect(this.zone, W, H), m = Math.max(zr.w, zr.h) * 0.45;
+      k = Math.max(1, Math.min(W / (zr.w + 2 * m), H / (zr.h + 2 * m), 6));
+      tx = clamp(W / 2 - (zr.x + zr.w / 2) * k, W - W * k, 0);
+      ty = clamp(H / 2 - (zr.y + zr.h / 2) * k, H - H * k, 0);
+    }
+    this.view = exporting ? this.view : { k: k, tx: tx, ty: ty };
+    cx.setTransform(dpr * k, 0, 0, dpr * k, dpr * tx, dpr * ty);
     if (this.productImg) cx.drawImage(this.productImg, 0, 0, W, H);
     else { cx.fillStyle = "#3A4049"; cx.fillRect(0, 0, W, H); }
 
-    var self = this;
+    var self = this, zoomed = k > 1;
+    var showLogo = this.zoneChosen && (exporting || stepNow !== "Logo & color");
     if (!exporting) {
       this.zones.forEach(function (z) {
-        var r = self.zoneRect(z, W, H), active = z === self.zone;
+        var r = self.zoneRect(z, W, H), active = self.zoneChosen && z === self.zone;
+        if (zoomed && !active) return;
         cx.save();
         cx.setLineDash([8, 6]);
-        cx.lineWidth = active ? 2.5 : 1.5;
+        cx.setLineDash([8 / k, 6 / k]);
+        cx.lineWidth = (active ? 2.5 : 1.5) / k;
         cx.strokeStyle = active ? "#E07A5F" : "rgba(255,255,255,0.55)";
-        if (active && !self.logo) { cx.fillStyle = "rgba(224,122,95,0.18)"; cx.fillRect(r.x, r.y, r.w, r.h); }
+        if (active && !showLogo) { cx.fillStyle = "rgba(224,122,95,0.18)"; cx.fillRect(r.x, r.y, r.w, r.h); }
+        if (stepNow === "Location") self.drawZoneLabel(cx, z, r, active);
         cx.strokeRect(r.x, r.y, r.w, r.h);
         cx.restore();
       });
     }
 
-    var pl = this.getPlace();
+    var pl = showLogo ? this.getPlace() : null;
+    this.logoBox = null;
     if (pl && this.logoCanvas) {
       var r2 = this.zoneRect(this.zone, W, H), ppi = r2.w / pl.zi.w;
       var bw = pl.w * ppi, bh = pl.h * ppi, bx = r2.x + pl.cx * ppi - bw / 2, by = r2.y + pl.cy * ppi - bh / 2;
@@ -618,29 +638,61 @@
       cx.drawImage(this.logoCanvas, bx, by, bw, bh);
       cx.restore();
       this.logoBox = { x: bx, y: by, w: bw, h: bh, ppi: ppi, zone: r2 };
-      if (!exporting && this.stepName() === "Place & size") {
+      if (!exporting && stepNow === "Size & position") {
         cx.save();
-        cx.strokeStyle = "#FFFDF8"; cx.lineWidth = 1; cx.setLineDash([]);
+        var hs = 6 / k;
+        cx.strokeStyle = "#FFFDF8"; cx.lineWidth = 1 / k; cx.setLineDash([]);
         cx.strokeRect(bx, by, bw, bh);
         [[bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh]].forEach(function (c) {
-          cx.fillStyle = "#FFFDF8"; cx.strokeStyle = "#E07A5F"; cx.lineWidth = 2;
-          cx.fillRect(c[0] - 6, c[1] - 6, 12, 12); cx.strokeRect(c[0] - 6, c[1] - 6, 12, 12);
+          cx.fillStyle = "#FFFDF8"; cx.strokeStyle = "#E07A5F"; cx.lineWidth = 2 / k;
+          cx.fillRect(c[0] - hs, c[1] - hs, hs * 2, hs * 2); cx.strokeRect(c[0] - hs, c[1] - hs, hs * 2, hs * 2);
         });
         cx.restore();
       }
     }
   };
 
+  // Location step: name each location on the photo.
+  Builder.prototype.drawZoneLabel = function (cx, z, r, active) {
+    cx.save();
+    cx.setLineDash([]);
+    cx.font = "600 12px system-ui, -apple-system, Segoe UI, sans-serif";
+    var tw = cx.measureText(z.label).width + 12, th = 20, x = r.x + r.w / 2 - tw / 2, y = r.y + r.h / 2 - th / 2;
+    cx.fillStyle = active ? "#E07A5F" : "rgba(31,42,54,0.78)";
+    cx.fillRect(x, y, tw, th);
+    cx.fillStyle = "#fff"; cx.textBaseline = "middle"; cx.textAlign = "center";
+    cx.fillText(z.label, r.x + r.w / 2, y + th / 2 + 0.5);
+    cx.restore();
+  };
+
+  Builder.prototype.chooseZone = function (z) {
+    this.zone = z;
+    this.zoneChosen = true;
+    this.estKey = null;
+    this.render();
+  };
+
   Builder.prototype.bindPointer = function () {
     var self = this, cv = this.canvas;
-    function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    // Pointer position in photo-layout coordinates (undoes the zoom).
+    function pos(e) {
+      var r = cv.getBoundingClientRect(), v = self.view || { k: 1, tx: 0, ty: 0 };
+      return { x: (e.clientX - r.left - v.tx) / v.k, y: (e.clientY - r.top - v.ty) / v.k };
+    }
     cv.addEventListener("pointerdown", function (e) {
+      var stepNow = self.stepName();
+      if (stepNow === "Location") {
+        var lp = pos(e), L = self.layout();
+        var hit = self.zones.filter(function (z) { var r = self.zoneRect(z, L.cssW, L.cssH); return lp.x >= r.x && lp.x <= r.x + r.w && lp.y >= r.y && lp.y <= r.y + r.h; })[0];
+        if (hit) self.chooseZone(hit);
+        return;
+      }
       if (!self.logoBox || !self.logo) return;
-      var placeIdx = self.stepIndex("Place & size");
-      if (self.step !== placeIdx) { if (self.step > self.stepIndex("Upload")) self.go(placeIdx); return; }
-      var p = pos(e), b = self.logoBox, pl = self.getPlace();
+      var placeIdx = self.stepIndex("Size & position");
+      if (self.step !== placeIdx) { if (self.step > placeIdx) self.go(placeIdx); return; }
+      var p = pos(e), b = self.logoBox, pl = self.getPlace(), tol = 14 / ((self.view && self.view.k) || 1);
       var corners = [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]];
-      var onCorner = corners.some(function (c) { return Math.abs(p.x - c[0]) < 14 && Math.abs(p.y - c[1]) < 14; });
+      var onCorner = corners.some(function (c) { return Math.abs(p.x - c[0]) < tol && Math.abs(p.y - c[1]) < tol; });
       var inside = p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
       if (!onCorner && !inside) return;
       cv.setPointerCapture(e.pointerId);
@@ -650,10 +702,14 @@
     cv.addEventListener("pointermove", function (e) {
       var p = pos(e), d = self.drag;
       if (!d) {
-        if (self.stepName() === "Place & size" && self.logoBox) {
-          var b = self.logoBox;
-          cv.style.cursor = (p.x >= b.x - 10 && p.x <= b.x + b.w + 10 && p.y >= b.y - 10 && p.y <= b.y + b.h + 10) ? "move" : "default";
-        }
+        var sn = self.stepName();
+        if (sn === "Size & position" && self.logoBox) {
+          var b = self.logoBox, t = 10 / ((self.view && self.view.k) || 1);
+          cv.style.cursor = (p.x >= b.x - t && p.x <= b.x + b.w + t && p.y >= b.y - t && p.y <= b.y + b.h + t) ? "move" : "default";
+        } else if (sn === "Location") {
+          var L2 = self.layout();
+          cv.style.cursor = self.zones.some(function (z) { var r = self.zoneRect(z, L2.cssW, L2.cssH); return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }) ? "pointer" : "default";
+        } else cv.style.cursor = "default";
         return;
       }
       var place = self.place[self.zone.id];
@@ -736,7 +792,7 @@
     back.style.visibility = this.step === 0 ? "hidden" : "visible";
     next.style.visibility = this.step >= steps.length - 1 ? "hidden" : "visible";
     next.disabled = !this.canGo(this.step + 1);
-    next.textContent = cur === "Method" && !this.methodKey ? "Choose a method to continue" : cur === "Upload" && !this.logo ? "Upload a logo to continue" : "Next";
+    next.textContent = cur === "Method" && !this.methodKey ? "Choose a method to continue" : cur === "Logo & color" && !this.logo ? "Upload a logo to continue" : cur === "Location" && !this.zoneChosen ? "Choose a location to continue" : "Next";
     next.className = this.canGo(this.step + 1) ? "emb-primary" : "emb-btn";
     next.style.width = "auto";
 
@@ -775,14 +831,15 @@
     p.appendChild(el("p", { class: "emb-help" }, "You can switch later without uploading your logo again."));
   };
 
-  Builder.prototype.stepApron = function (p) {
+  // Apron color (on the Logo & color step).
+  Builder.prototype.colorPicker = function (p) {
     var self = this, vs = this.cfg.variants || [];
-    p.appendChild(el("h3", null, "Choose apron color and location"));
+    if (vs.length < 2) return;
     var distinct = {};
     vs.forEach(function (v) { distinct[v.image] = 1; });
-    if (vs.length > 1 && Object.keys(distinct).length < vs.length) {
+    if (Object.keys(distinct).length < vs.length) {
       // Colors share one embroidery photo: choose by name.
-      p.appendChild(el("p", { class: "emb-label" }, "Color"));
+      p.appendChild(el("p", { class: "emb-label" }, "Apron color"));
       var vc = el("div", { class: "emb-chips" });
       vs.forEach(function (v) {
         var b = el("button", { type: "button", class: "emb-chip", "aria-pressed": String(v === self.variant) }, esc(v.title));
@@ -791,8 +848,8 @@
         vc.appendChild(b);
       });
       p.appendChild(vc);
-    } else if (vs.length > 1) {
-      p.appendChild(el("p", { class: "emb-label" }, "Color: " + esc(this.variant ? this.variant.title : "")));
+    } else {
+      p.appendChild(el("p", { class: "emb-label" }, "Apron color: " + esc(this.variant ? this.variant.title : "")));
       var sw = el("div", { class: "emb-swatches" }), seen = {};
       vs.forEach(function (v) {
         if (seen[v.image]) return; seen[v.image] = 1;
@@ -803,26 +860,10 @@
       });
       p.appendChild(sw);
     }
-    p.appendChild(el("p", { class: "emb-label" }, "Location"));
-    if (!this.zones.length) {
-      p.appendChild(el("p", { class: "emb-warn" }, "No embroidery locations are set up for this apron yet."));
-      return;
-    }
-    var chips = el("div", { class: "emb-chips" });
-    this.zones.forEach(function (z) {
-      var b = el("button", { type: "button", class: "emb-chip", "aria-pressed": String(z === self.zone) }, esc(z.label));
-      b.addEventListener("click", function () { self.zone = z; self.render(); });
-      chips.appendChild(b);
-    });
-    p.appendChild(chips);
-    var zi = this.zoneInches(this.zone);
-    var lim = [], z0 = this.zone;
-    var mc = z0.maxColors || (this.pricing && this.pricing.maxColors);
-    if (mc) lim.push("up to " + mc + " color" + (mc === 1 ? "" : "s"));
-    if (z0.maxStitches && this.isEmbroidery()) lim.push("up to " + fmtInt(z0.maxStitches) + " stitches");
-    if (z0.minQty) lim.push(z0.minQty + " minimum");
-    if (z0.qtyStep > 1) lim.push("ordered in multiples of " + z0.qtyStep);
-    p.appendChild(el("p", { class: "emb-help" }, "Largest logo here: " + Math.min(z0.maxW || zi.w, zi.w).toFixed(1) + "″ wide × " + Math.min(z0.maxH || zi.h, zi.h).toFixed(1) + "″ tall" + (lim.length ? "; " + lim.join(", ") : "") + "."));
+  };
+
+  Builder.prototype.methodLink = function (p) {
+    var self = this;
     if (this.showMethodStep() && this.methodKey) {
       var sw = el("button", { type: "button", class: "emb-link" }, "Method: " + esc(this.pricing.name) + " · change");
       sw.addEventListener("click", function () { self.go(self.stepIndex("Method")); });
@@ -830,7 +871,36 @@
     }
   };
 
-  Builder.prototype.stepUpload = function (p) {
+  Builder.prototype.zoneLimits = function (z0) {
+    var zi = this.zoneInches(z0), lim = [];
+    var mc = z0.maxColors || (this.pricing && this.pricing.maxColors);
+    if (mc) lim.push("up to " + mc + " color" + (mc === 1 ? "" : "s"));
+    if (z0.maxStitches && this.isEmbroidery()) lim.push("up to " + fmtInt(z0.maxStitches) + " stitches");
+    if (z0.minQty) lim.push(z0.minQty + " minimum");
+    if (z0.qtyStep > 1) lim.push("ordered in multiples of " + z0.qtyStep);
+    return "Largest logo here: " + Math.min(z0.maxW || zi.w, zi.w).toFixed(1) + "″ wide × " + Math.min(z0.maxH || zi.h, zi.h).toFixed(1) + "″ tall" + (lim.length ? "; " + lim.join(", ") : "") + ".";
+  };
+
+  Builder.prototype.stepLocation = function (p) {
+    var self = this;
+    p.appendChild(el("h3", null, "Where should your logo go?"));
+    if (!this.zones.length) {
+      p.appendChild(el("p", { class: "emb-warn" }, "No locations are set up for this apron yet."));
+      return;
+    }
+    p.appendChild(el("p", { class: "emb-help" }, "Tap a spot on the apron, or choose one here. You'll size and position it next."));
+    var chips = el("div", { class: "emb-chips" });
+    this.zones.forEach(function (z) {
+      var b = el("button", { type: "button", class: "emb-chip", "aria-pressed": String(self.zoneChosen && z === self.zone) }, esc(z.label));
+      b.addEventListener("click", function () { self.chooseZone(z); });
+      chips.appendChild(b);
+    });
+    p.appendChild(chips);
+    if (this.zoneChosen) p.appendChild(el("p", { class: "emb-help" }, this.zoneLimits(this.zone)));
+    this.methodLink(p);
+  };
+
+  Builder.prototype.stepLogo = function (p) {
     var self = this;
     p.appendChild(el("h3", null, "Upload your logo"));
     var drop = el("label", { class: "emb-drop" },
@@ -863,6 +933,8 @@
       if (L.palette.length > 6) p.appendChild(el("p", { class: "emb-warn" }, "This logo has a lot of colors. Embroidery works best with fewer flat colors; you can merge them on the Colors step."));
     }
     p.appendChild(el("p", { class: "emb-help" }, "We keep your original file exactly as uploaded for production."));
+    this.colorPicker(p);
+    this.methodLink(p);
   };
 
   // Remove the plain background (default) or keep it as part of the design.
@@ -924,15 +996,13 @@
 
   Builder.prototype.stepPlace = function (p) {
     var self = this, pl = this.getPlace();
-    p.appendChild(el("h3", null, "Place and size your logo"));
-    p.appendChild(el("p", { class: "emb-help" }, "Drag the logo to move it. Drag a corner or use the slider to resize. It always stays inside the dashed area."));
-    var chips = el("div", { class: "emb-chips" });
-    this.zones.forEach(function (z) {
-      var b = el("button", { type: "button", class: "emb-chip", "aria-pressed": String(z === self.zone) }, esc(z.label));
-      b.addEventListener("click", function () { self.zone = z; self.render(); });
-      chips.appendChild(b);
-    });
-    p.appendChild(chips);
+    p.appendChild(el("h3", null, "Size and position"));
+    var loc = el("p", { class: "emb-help" }, "Location: <strong>" + esc(this.zone.label) + "</strong> ");
+    var ch = el("button", { type: "button", class: "emb-link" }, "change");
+    ch.addEventListener("click", function () { self.go(self.stepIndex("Location")); });
+    loc.appendChild(ch);
+    p.appendChild(loc);
+    p.appendChild(el("p", { class: "emb-help" }, "We zoomed in on this location. Drag the logo to move it. Drag a corner or use the slider to resize. It always stays inside the dashed area."));
     p.appendChild(el("p", { class: "emb-label" }, "Logo size"));
     var range = el("input", { type: "range", class: "emb-range", min: String(pl.minW.toFixed(2)), max: String(pl.maxW.toFixed(2)), step: "0.05", value: String(pl.w), "aria-label": "Logo width in inches", "data-range": "" });
     range.addEventListener("input", function () { self.place[self.zone.id].w = parseFloat(range.value); self.scheduleUpdate(); });

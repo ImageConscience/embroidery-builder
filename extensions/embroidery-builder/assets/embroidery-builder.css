@@ -1,7 +1,9 @@
 /* Hidden unless the "Imprint Customizer switch" app embed is on for this theme. */
 .emb-root[data-emb-root]{display:none}
-.emb-open{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin:12px 0;padding:12px 20px;border:0;border-radius:8px;background:var(--emb-accent,#B44A31);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.emb-open{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin:12px 0;padding:var(--emb-btn-pad,12px) 20px;border:var(--emb-btn-bw,0) solid var(--emb-btn-bc,transparent);border-radius:var(--emb-btn-radius,8px);background:var(--emb-btn-bg,var(--emb-accent,#B44A31));color:var(--emb-btn-fg,#fff);font:inherit;font-family:var(--emb-btn-font,inherit);font-size:var(--emb-btn-fs,inherit);font-weight:var(--emb-btn-weight,700);text-transform:var(--emb-btn-case,none);letter-spacing:.01em;line-height:1.2;cursor:pointer;box-sizing:border-box}
+.emb-open--fit{width:auto}
 .emb-open:hover{filter:brightness(.95)}
+.emb-open:focus-visible{outline:2px solid var(--emb-accent,#B44A31);outline-offset:2px}
 .emb-modal{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:stretch;justify-content:center;background:rgba(20,24,30,.55);font-family:inherit;color:#1F2A36}
 .emb-modal *{box-sizing:border-box}
 .emb-dialog{position:relative;display:flex;flex-direction:column;width:min(1180px,100%);max-height:100%;margin:auto;background:#FFFDF8;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}

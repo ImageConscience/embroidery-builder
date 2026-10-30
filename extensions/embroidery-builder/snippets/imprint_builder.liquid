@@ -1,7 +1,7 @@
 {%- comment -%}
   Imprint Customizer builder markup, shared by the app block (themes with app blocks) and the
   "Imprint Customizer switch" app embed (auto-placement for themes without app blocks).
-  Params: root_id, root_attrs, button_label, accent_color, use_fallback_setting, zones_json,
+  Params: root_id, root_attrs, s (block settings: button label and styling), accent_color, use_fallback_setting, zones_json,
   auto_place (true when placed by the embed), place_selector, place_position (before|after).
   The product's location templates (imprint.location_templates) and mockup photo (imprint.mockup_photo,
   product or variant) decide whether it shows; the JSON setting is only a fallback for products without templates.
@@ -47,9 +47,36 @@
     </p>
   {%- endif -%}
   <div class="emb-root" data-emb-root id="emb-{{ root_id }}"{% if auto_place %} data-emb-auto="{{ place_selector | escape }}" data-emb-auto-pos="{{ place_position | default: 'before' }}"{% endif %} {{ root_attrs }}>
-    <button type="button" class="emb-open" data-emb-open
-      style="--emb-accent: {{ accent_color }};">
-      {{ button_label | default: 'Customize with your logo' | escape }}
+    {%- liquid
+      assign b_bg = s.accent_color | default: accent_color | default: '#B44A31'
+      assign b_fg = s.text_color | default: '#FFFFFF'
+      assign b_style = s.button_style | default: 'filled'
+      assign b_bw = s.border_width | default: 0
+      assign b_bc = s.border_color | default: b_bg
+      assign b_radius = s.border_radius | default: 8
+      assign b_fs = s.font_size | default: 16
+      assign b_pad = s.padding | default: 12
+      assign b_case = s.text_case | default: 'none'
+      assign b_full = true
+      if s.full_width == false
+        assign b_full = false
+      endif
+      if b_style == 'outline'
+        assign b_fill = 'transparent'
+        assign b_fg = b_bg
+        if b_bw == 0
+          assign b_bw = 2
+        endif
+      else
+        assign b_fill = b_bg
+      endif
+    -%}
+    {%- if s.font_source == 'custom' and s.button_font -%}
+      <style>{{ s.button_font | font_face: font_display: 'swap' }}</style>
+    {%- endif -%}
+    <button type="button" class="emb-open{% unless b_full %} emb-open--fit{% endunless %}" data-emb-open
+      style="--emb-accent: {{ b_bg }}; --emb-btn-bg: {{ b_fill }}; --emb-btn-fg: {{ b_fg }}; --emb-btn-bw: {{ b_bw }}px; --emb-btn-bc: {{ b_bc }}; --emb-btn-radius: {{ b_radius }}px; --emb-btn-fs: {{ b_fs }}px; --emb-btn-pad: {{ b_pad }}px; --emb-btn-case: {{ b_case }};{% if s.font_source == 'custom' and s.button_font %} --emb-btn-font: '{{ s.button_font.family }}', {{ s.button_font.fallback_families }}; --emb-btn-weight: {{ s.button_font.weight }};{% endif %}">
+      {{ s.button_label | default: button_label | default: 'Customize with your logo' | escape }}
     </button>
     <script type="application/json" data-emb-config>
       {
@@ -99,7 +126,7 @@
         ],
         "zones": {%- if use_fallback -%}{{ zones_json }}{%- else -%}[]{%- endif -%},
         "currency": {{ cart.currency.iso_code | json }},
-        "accent": {{ accent_color | json }}
+        "accent": {{ s.accent_color | default: accent_color | default: "#B44A31" | json }}
       }
     </script>
   </div>
