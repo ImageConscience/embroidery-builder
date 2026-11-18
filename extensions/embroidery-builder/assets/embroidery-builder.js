@@ -26,8 +26,9 @@
     setupFee: 35
   };
   var DEFAULT_EST = {
-    fillPerSqIn: 1800, satinPerSqIn: 1100, runPerIn: 12, perColor: 60, base: 150,
-    satinMaxWidthIn: 0.25, uncertainty: 0.2
+    // Same as ESTIMATOR in app/lib/pricing.server.ts (calibrated on 147 real worksheets, Nov 2026)
+    fillPerSqIn: 1200, satinPerSqIn: 620, runPerIn: 75, perColor: 150, base: 0,
+    satinMaxWidthIn: 0.25, uncertainty: 0.3
   };
   var STEP_NAMES = ["Logo & color", "Location", "Size & position", "Colors", "Price", "Checkout"];
   var PREVIEW_TYPES = /^image\/(png|jpe?g|svg\+xml|webp|gif)$/i;
@@ -1377,5 +1378,5 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootAll); else bootAll();
   document.addEventListener("shopify:section:load", bootAll);
 
-  window.EmbroideryBuilder = { Builder: Builder, open: function (cfg) { var b = new Builder(cfg); b.open(); return b; }, _estimate: estimateStitches, _price: price };
+  window.EmbroideryBuilder = { Builder: Builder, open: function (cfg) { var b = new Builder(cfg); b.open(); return b; }, _estimate: estimateStitches, _price: price, _analyze: analyzeLogo };
 })();
