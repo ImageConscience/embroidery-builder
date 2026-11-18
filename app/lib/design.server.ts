@@ -3,6 +3,9 @@ import { zipSync, strToU8 } from "fflate";
 import prisma from "../db.server";
 import { fileUrls, type AdminLike } from "./files.server";
 import { firstDecoration } from "./spec";
+import { getMethod } from "./methods.server";
+import { threadsForColors } from "./threads.server";
+import { closeness, type ThreadMatch } from "./threads";
 
 // Design center helpers: workflow stages, customer links, signed file URLs and the production package.
 
@@ -97,7 +100,7 @@ const esc = (s: unknown) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 // One-page spec sheet (HTML, prints well) for the embroiderer/digitizer.
-export function specSheetHtml(ref: string, s: any, files: { mockup?: string; artwork?: string; proof?: string }) {
+export function specSheetHtml(ref: string, s: any, files: { mockup?: string; artwork?: string; proof?: string }, threads?: { chart: { name: string; brand: string } | null; matches: (ThreadMatch | null)[] }) {
   const sp = s.spec ?? {};
   const d = firstDecoration(sp);
   const emb = (d?.method.kind ?? "embroidery") === "embroidery";
@@ -114,8 +117,12 @@ export function specSheetHtml(ref: string, s: any, files: { mockup?: string; art
       : []),
     ["Quantity", String(sp.quantity ?? s.quantity ?? "—")],
   ];
+  const choice: Record<string, string> = { original: "Keep the logo's colors (closest thread match)", white: "All white", black: "All black", custom: "Specific colors requested (below)" };
+  if (d?.colorChoice) rows.push(["Color choice", choice[d.colorChoice] ?? d.colorChoice]);
+  if (d?.colorComment) rows.push(["Color comments", d.colorComment]);
+  const tc = threads?.chart;
   const colors = (d?.colors ?? [])
-    .map((c: any, i: number) => `<tr><td>${i + 1}</td><td><span class="sw" style="background:${esc(c.hex)}"></span>${esc(c.hex)}</td><td>${esc(c.pantone || "—")}</td><td>${Math.round((c.share ?? 0) * 100)}%</td></tr>`)
+    .map((c: any, i: number) => `<tr><td>${i + 1}</td><td><span class="sw" style="background:${esc(c.hex)}"></span>${esc(c.hex)}</td><td>${esc(c.pantone || "—")}</td><td>${Math.round((c.share ?? 0) * 100)}%</td>${tc ? `<td>${threads!.matches[i] ? `<strong>${esc(threads!.matches[i]!.thread)}</strong>${threads!.matches[i]!.alternates.length ? ` or ${esc(threads!.matches[i]!.alternates.join(", "))}` : ""} (PMS ${esc(threads!.matches[i]!.pms)}; ${threads!.matches[i]!.via === "pms" ? "customer's Pantone" : esc(closeness(threads!.matches[i]!.distance).toLowerCase())})` : "—"}</td>` : ""}</tr>`)
     .join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(ref)} spec sheet</title>
 <style>body{font:14px/1.4 -apple-system,Segoe UI,Arial,sans-serif;color:#222;margin:32px;max-width:900px}h1{font-size:22px;margin:0 0 4px}
@@ -127,7 +134,7 @@ table{border-collapse:collapse;width:100%}td{border-bottom:1px solid #e5e5e5;pad
 <div class="grid">${files.mockup ? `<div><strong>Mockup</strong><br><img src="${esc(files.mockup)}" alt=""></div>` : ""}${files.artwork ? `<div><strong>Artwork (as approved colors)</strong><br><img src="${esc(files.artwork)}" alt=""></div>` : ""}${files.proof ? `<div><strong>Proof</strong><br><img src="${esc(files.proof)}" alt=""></div>` : ""}</div>
 <table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>
 <h2 style="font-size:16px;margin-top:24px">${emb ? "Thread" : "Ink"} colors</h2>
-<table><tr><td>#</td><td>Hex</td><td>Pantone</td><td>Share of logo</td></tr>${colors}</table>
+<table><tr><td>#</td><td>Hex</td><td>Pantone</td><td>Share of logo</td>${tc ? `<td>Suggested ${esc(tc.brand || "thread")} (${esc(tc.name)})</td>` : ""}</tr>${colors}</table>
 ${s.notes ? `<h2 style="font-size:16px;margin-top:24px">Customer notes</h2><p>${esc(s.notes)}</p>` : ""}
 <p style="color:#666;margin-top:24px">${emb ? "Stitch count is the builder's estimate. Thread is matched to the hex or Pantone at digitizing." : "Inks are matched to the closest stock color unless a Pantone code is given."}</p>
 </body></html>`;
@@ -146,7 +153,10 @@ export async function buildPackage(admin: AdminLike | null, s: any) {
   const artwork = await add("artwork.png", s.artworkFileId, s.artworkData);
   const mockup = await add("mockup.png", s.mockupFileId, s.mockupData);
   const proof = await add(`proof.${extFor(s.proofType, s.proofName)}`, s.proofFileId, s.proofData);
-  files["spec-sheet.html"] = strToU8(specSheetHtml(ref, s, { mockup, artwork, proof: proof && /png|jpe?g|webp|gif|svg/.test(proof) ? proof : undefined }));
+  const deco = firstDecoration(s.spec ?? {});
+  const method = deco ? await getMethod(s.shop, deco.method.key).catch(() => null) : null;
+  const threads = method?.threadChartId ? await threadsForColors(s.shop, method.threadChartId, deco?.colors ?? []).catch(() => undefined) : undefined;
+  files["spec-sheet.html"] = strToU8(specSheetHtml(ref, s, { mockup, artwork, proof: proof && /png|jpe?g|webp|gif|svg/.test(proof) ? proof : undefined }, threads));
   files["spec.json"] = strToU8(JSON.stringify({ reference: ref, ...(s.spec ?? {}), notes: s.notes ?? null }, null, 2));
   const zipped = zipSync(Object.fromEntries(Object.entries(files).map(([k, v]) => [`${ref}/${k}`, v])), { level: 6 });
   return { name: `${ref}.zip`, bytes: zipped };

@@ -117,6 +117,7 @@ model Method {
   maxColors           Int?
   leadTime            String   @default("")
   colorNote           String   @default("")
+  threadChartId       String? // the vendor's PMS → thread chart used to suggest thread numbers
   createdAt           DateTime @default(now())
   updatedAt           DateTime @default(now()) @updatedAt
 
@@ -144,4 +145,20 @@ model Alert {
   resolvedAt   DateTime?
 
   @@index([shop, resolvedAt, createdAt])
+}
+
+// A vendor's Pantone → thread cross-reference (e.g. Seaside's Isacord chart, DayStar's Gunold chart).
+// Staff upload it as CSV and can download it, edit it and upload a replacement.
+model ThreadChart {
+  id        String   @id @default(cuid())
+  shop      String
+  name      String
+  brand     String   @default("") // thread brand, e.g. Isacord
+  fileName  String   @default("")
+  rows      Json // [{ pms, hex, thread, threadName }]
+  rowCount  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([shop])
 }

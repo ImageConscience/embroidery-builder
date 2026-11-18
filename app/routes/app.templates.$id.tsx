@@ -552,22 +552,15 @@ export default function TemplateEditor() {
                           <span>Largest logo width (in)</span>
                           <input type="number" min="0.5" step="0.25" value={zone.maxW} onChange={(e) => setZone(zone.id, { maxW: parseFloat(e.target.value) || 0 })} />
                         </label>
-                        <label className="tpe-field">
-                          <span>Largest logo height (in)</span>
-                          <input type="number" min="0.5" step="0.25" value={zone.maxH} onChange={(e) => setZone(zone.id, { maxH: parseFloat(e.target.value) || 0 })} />
-                        </label>
                       </div>
-                      {tpl.photoWidthIn > 1 && (zone.maxW > box.w + 0.05 || zone.maxH > box.h + 0.05) ? (
-                        <p className="tpe-warn">The largest logo is bigger than the area drawn, so it will be limited to the area ({fmt(box.w)}″ × {fmt(box.h)}″). Draw a bigger area or lower the size.</p>
+                      <p className="tpe-note">Customers choose a width; the height follows their logo's shape and only has to fit inside the area drawn.</p>
+                      {tpl.photoWidthIn > 1 && zone.maxW > box.w + 0.05 ? (
+                        <p className="tpe-warn">The largest width is wider than the area drawn, so it will be limited to the area ({fmt(box.w)}″). Draw a wider area or lower the width.</p>
                       ) : null}
                       <div className="tpe-row">
                         <label className="tpe-field">
                           <span>Smallest logo width (in)</span>
                           <input type="number" min="0" step="0.25" placeholder="Optional" value={zone.minW ?? ""} onChange={(e) => setZone(zone.id, { minW: parseFloat(e.target.value) || undefined })} />
-                        </label>
-                        <label className="tpe-field">
-                          <span>Most colors</span>
-                          <input type="number" min="1" step="1" placeholder={methodMaxColors ? `Method default (${methodMaxColors})` : "No limit"} value={zone.maxColors ?? ""} onChange={(e) => setZone(zone.id, { maxColors: parseInt(e.target.value, 10) || undefined })} />
                         </label>
                       </div>
                       <div className="tpe-row">

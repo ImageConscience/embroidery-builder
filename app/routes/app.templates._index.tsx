@@ -86,7 +86,7 @@ export default function Templates() {
                       {t.zones
                         .map((z: any) => {
                           const b = zoneBoxInches(z, t);
-                          return `${z.label} (up to ${Math.min(z.maxW, b.w).toFixed(1)}″ × ${Math.min(z.maxH, b.h).toFixed(1)}″)`;
+                          return `${z.label} (up to ${Math.min(z.maxW, b.w).toFixed(1)}″ wide)`;
                         })
                         .join(", ")}
                     </span>

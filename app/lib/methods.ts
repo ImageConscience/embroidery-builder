@@ -22,6 +22,7 @@ export type MethodData = {
   maxColors: number | null; // default most colors on one design; a location can set its own
   leadTime: string;
   colorNote: string;
+  threadChartId: string | null; // vendor's Pantone → thread chart
 };
 
 export const KIND_LABELS: Record<MethodKind, string> = {
@@ -52,9 +53,10 @@ export const DEFAULT_METHODS: MethodData[] = [
     includedColors: 4,
     perExtraColor: 1,
     customColorFee: 0,
-    maxColors: 3,
+    maxColors: null,
     leadTime: "10–12 business days after proof approval",
     colorNote: "Thread is matched to your hex or Pantone color.",
+    threadChartId: null,
   },
   {
     key: "standard_embroidery",
@@ -77,9 +79,10 @@ export const DEFAULT_METHODS: MethodData[] = [
     includedColors: 4,
     perExtraColor: 1,
     customColorFee: 0,
-    maxColors: 3,
+    maxColors: null,
     leadTime: "7–10 business days after the aprons reach our decorator and the proof is approved",
     colorNote: "Thread is matched to your hex or Pantone color.",
+    threadChartId: null,
   },
   {
     key: "screen_print",
@@ -102,9 +105,10 @@ export const DEFAULT_METHODS: MethodData[] = [
     includedColors: 4,
     perExtraColor: 1,
     customColorFee: 0,
-    maxColors: 3,
+    maxColors: null,
     leadTime: "7–10 business days after the aprons reach our decorator and the proof is approved",
     colorNote: "Ink is matched to your hex or Pantone color. A white underbase is added when needed at no charge.",
+    threadChartId: null,
   },
 ];
 
@@ -116,7 +120,7 @@ export function priceFor(m: Pick<MethodData, "kind" | "tiers" | "setupFee" | "in
   for (const t of tiers) if (p.quantity >= t.min) tier = t;
   const extraK =
     m.kind === "embroidery" && m.includedStitches != null
-      ? Math.max(0, Math.ceil(((p.stitches ?? 0) - m.includedStitches) / 1000))
+      ? Math.max(0, Math.floor(((p.stitches ?? 0) - m.includedStitches) / 1000)) // rounded down: 7,598 with 6,000 included is 1 extra thousand
       : 0;
   const stitchCharge = extraK * (m.perThousandStitches ?? 0);
   const extraColors = Math.max(0, p.colors - m.includedColors);
@@ -169,6 +173,7 @@ export function validateMethod(input: any): { data: MethodData; errors: string[]
       maxColors: n(input?.maxColors, null) ? Math.round(n(input?.maxColors, null) as number) : null,
       leadTime: String(input?.leadTime ?? "").slice(0, 200),
       colorNote: String(input?.colorNote ?? "").slice(0, 400),
+      threadChartId: input?.threadChartId ? String(input.threadChartId) : null,
     },
     errors,
   };

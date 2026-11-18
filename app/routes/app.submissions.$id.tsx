@@ -10,6 +10,8 @@ import { uploadToShopifyFiles } from "../lib/files.server";
 import { ESTIMATOR } from "../lib/pricing.server";
 import { getMethod } from "../lib/methods.server";
 import { firstDecoration } from "../lib/spec";
+import { threadsForColors } from "../lib/threads.server";
+import { closeness } from "../lib/threads";
 import { addEvent, customerLink, ensureToken, fileLinks, signedUrl } from "../lib/design.server";
 import { STAGES, isStage, stageLabel } from "../lib/stages";
 
@@ -45,15 +47,24 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     logoDownload: s.logoData ? `${signedUrl(s.id, "logo", 3600, true)}&download=1` : links.logo,
     messages: s.messages.map((m) => ({ id: m.id, kind: m.kind, author: m.author, authorName: m.authorName, body: m.body, createdAt: m.createdAt.toISOString() })),
     deco: firstDecoration(s.spec),
-    pricing: await (async () => {
+    ...(await (async () => {
       const m = await getMethod(session.shop, firstDecoration(s.spec)?.method.key ?? "standard_embroidery");
-      return { includedStitches: m?.includedStitches ?? 6000, includedColors: m?.includedColors ?? 4, perThousand: m?.perThousandStitches ?? 1, perExtraColor: m?.perExtraColor ?? 1, customColorFee: m?.customColorFee ?? 0 };
-    })(),
+      return {
+        pricing: { includedStitches: m?.includedStitches ?? 6000, includedColors: m?.includedColors ?? 4, perThousand: m?.perThousandStitches ?? 1, perExtraColor: m?.perExtraColor ?? 1, customColorFee: m?.customColorFee ?? 0 },
+        threads: await threadsForColors(session.shop, m?.threadChartId, firstDecoration(s.spec)?.colors ?? []).catch(() => ({ chart: null, matches: [] })),
+      };
+    })()),
     estimator: ESTIMATOR,
   };
 };
 
 const MAX_PROOF = 20 * 1024 * 1024;
+
+const COLOR_CHOICES: Record<string, string> = {
+  original: "Keep the logo's colors (closest thread match)",
+  white: "All white",
+  black: "All black",
+};
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -243,6 +254,7 @@ export default function DesignPage() {
               <th>Pantone</th>
               <th>Detected in logo</th>
               <th>Share</th>
+              {d.threads.chart ? <th>Suggested thread ({d.threads.chart.brand || d.threads.chart.name})</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -255,10 +267,29 @@ export default function DesignPage() {
                   <span className="ds-sw ds-sw-sm" style={{ background: c.detected }} /> {c.detected}
                 </td>
                 <td>{Math.round((c.share ?? 0) * 100)}%</td>
+                {d.threads.chart ? (
+                  <td>
+                    {d.threads.matches[i] ? (
+                      <>
+                        <strong>{d.threads.matches[i]!.thread}</strong>
+                        {d.threads.matches[i]!.alternates.length ? ` or ${d.threads.matches[i]!.alternates.join(", ")}` : ""} · PMS {d.threads.matches[i]!.pms}
+                        <br />
+                        <small>{d.threads.matches[i]!.via === "pms" ? "From the customer's Pantone" : closeness(d.threads.matches[i]!.distance)}</small>
+                      </>
+                    ) : "—"}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
+        {deco.colorChoice && deco.colorChoice !== "custom" ? (
+          <p className="ds-note"><strong>Customer chose:</strong> {COLOR_CHOICES[deco.colorChoice] ?? deco.colorChoice}</p>
+        ) : deco.colorChoice === "custom" ? (
+          <p className="ds-note"><strong>Customer requested specific colors</strong> (hex / Pantone below).</p>
+        ) : null}
+        {deco.colorComment ? <p className="ds-note"><strong>Color comments:</strong> {deco.colorComment}</p> : null}
+        {!d.threads.chart ? <p className="ds-note">Choose a thread chart for this method on the Methods page to see suggested thread numbers.</p> : null}
         <p className="ds-note">
           {deco.colorCount ?? 0} distinct colors · {d.pricing.includedColors} included{deco.customColorCount ? ` · ${deco.customColorCount} custom Pantone ink${deco.customColorCount === 1 ? "" : "s"}` : ""}
         </p>

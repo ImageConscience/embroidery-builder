@@ -22,9 +22,11 @@ export async function checkDesign(admin: AdminLike, shop: string, spec: any) {
     zone = t.zones.find((z) => z.id === d?.zone?.id) ?? null;
     if (!zone) return fail("Please choose a location again; this one isn't available.");
     const box = zoneBoxInches(zone, t);
-    const maxW = Math.min(zone.maxW || box.w, box.w), maxH = Math.min(zone.maxH || box.h, box.h);
+    // Customers choose a width; height follows the logo's shape and only has to fit the location.
+    const maxW = Math.min(zone.maxW || box.w, box.w);
     const w = Number(d?.size?.widthIn) || 0, h = Number(d?.size?.heightIn) || 0;
-    if (w > maxW + 0.06 || h > maxH + 0.06) return fail(`Your logo is larger than ${zone.label} allows (${maxW.toFixed(1)}″ × ${maxH.toFixed(1)}″).`);
+    if (w > maxW + 0.06) return fail(`Your logo is wider than ${zone.label} allows (${maxW.toFixed(1)}″).`);
+    if (h > box.h + 0.06) return fail(`Your logo is taller than ${zone.label} has room for. Make it a little narrower.`);
     if (zone.minW && w < zone.minW - 0.06) return fail(`${zone.label} needs a logo at least ${zone.minW}″ wide.`);
   } else if (method.key !== "standard_embroidery") {
     return fail(`${method.name} isn't offered on this apron.`);
@@ -32,9 +34,7 @@ export async function checkDesign(admin: AdminLike, shop: string, spec: any) {
 
   const colors = Math.max(1, Math.min(30, parseInt(d?.colorCount, 10) || 1));
   const customColors = Math.max(0, Math.min(colors, parseInt(d?.customColorCount, 10) || 0));
-  // The location's own limit wins; otherwise the method default.
-  const maxColors = zone?.maxColors || method.maxColors || Infinity;
-  if (colors > maxColors) return fail(`${zone?.label ?? "This location"} allows up to ${maxColors} colors for ${method.name.toLowerCase()}.`);
+  // No color limit: extra colors are charged (rare high counts are handled by staff case by case).
   // Stitches come from the builder's estimate (charged as final).
   const stitches = method.kind === "embroidery" ? Math.max(500, Number(d?.estimate?.stitches) || 0) : 0;
   if (zone?.maxStitches && stitches > zone.maxStitches) return fail(`That design needs more stitches than ${zone.label} allows. Try a smaller logo.`);

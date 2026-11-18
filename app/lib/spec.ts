@@ -12,6 +12,8 @@ export type Decoration = {
   estimate: { stitches: number; low: number; high: number; fillSqIn: number; satinSqIn: number; outlineIn: number } | null;
   background: string | null;
   insideAreasStitched: boolean;
+  colorChoice: "original" | "white" | "black" | "custom" | null; // the customer's pick on the colors step
+  colorComment: string;
 };
 
 export function decorations(spec: any): Decoration[] {
@@ -28,6 +30,8 @@ export function decorations(spec: any): Decoration[] {
       estimate: d?.estimate ?? null,
       background: d?.background ?? null,
       insideAreasStitched: !!d?.insideAreasStitched,
+      colorChoice: ["original", "white", "black", "custom"].includes(d?.colorChoice) ? d.colorChoice : null,
+      colorComment: typeof d?.colorComment === "string" ? d.colorComment.slice(0, 1000) : "",
     }));
   }
   return [
@@ -42,6 +46,8 @@ export function decorations(spec: any): Decoration[] {
       estimate: spec.estimate ?? null,
       background: spec.background ?? null,
       insideAreasStitched: !!spec.insideAreasStitched,
+      colorChoice: null,
+      colorComment: "",
     },
   ];
 }

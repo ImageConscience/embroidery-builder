@@ -26,6 +26,7 @@ export default function App() {
         <s-link href="/app">{attention ? `Design center (${attention} need reply)` : "Design center"}</s-link>
         <s-link href="/app/templates">Location templates</s-link>
         <s-link href="/app/methods">Methods</s-link>
+        <s-link href="/app/threads">Thread charts</s-link>
         <s-link href="/app/settings">{problems ? `Settings (${problems} problem${problems === 1 ? "" : "s"})` : "Settings"}</s-link>
       </s-app-nav>
       <Outlet />

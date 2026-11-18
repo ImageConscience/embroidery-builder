@@ -85,3 +85,16 @@
 .emb-method span{font-size:14px;opacity:.8}
 .emb-method .emb-method-meta{font-size:13px;opacity:.7}
 .emb-link{border:0;background:none;padding:0;margin:4px 0;font:inherit;font-size:14px;color:var(--emb-accent,#B44A31);text-decoration:underline;cursor:pointer}
+.emb-colormodes{border:0;margin:12px 0;padding:0;display:grid;gap:8px}
+.emb-modeopt{display:flex;gap:12px;align-items:center;padding:10px 12px;border:2px solid #DDD5C6;border-radius:10px;cursor:pointer;background:#fff}
+.emb-modeopt.is-on{border-color:var(--emb-accent,#B44A31);background:#FFF8F4}
+.emb-modeopt:focus-within{outline:2px solid var(--emb-accent,#B44A31);outline-offset:2px}
+.emb-modeopt strong{display:block}
+.emb-modeopt .emb-dot{flex:0 0 28px}
+.emb-dots{display:flex;flex:0 0 auto}
+.emb-dots .emb-dot{width:18px;height:18px;flex:0 0 18px;margin-right:-6px}
+.emb-dots{min-width:34px}
+.emb-dot-custom{background:conic-gradient(#d33,#fc3,#3c6,#39f,#a3f,#d33)}
+.emb-advanced{display:grid;gap:8px;margin:0 0 12px;padding:12px;border-radius:10px;background:#FBF8F3;border:1px solid #E6DFD2}
+.emb-colorline{font-weight:500}
+.emb-size-h{display:block;font-size:13px;font-weight:400;color:#6B6358;margin-top:2px}

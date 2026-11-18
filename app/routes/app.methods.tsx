@@ -7,10 +7,12 @@ import { authenticate } from "../shopify.server";
 import { listMethods, saveMethod } from "../lib/methods.server";
 import { KIND_LABELS, validateMethod, type MethodData } from "../lib/methods";
 import { slug } from "../lib/templates";
+import { listCharts, type ChartSummary } from "../lib/threads.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  return { methods: await listMethods(session.shop) };
+  const [methods, charts] = await Promise.all([listMethods(session.shop), listCharts(session.shop)]);
+  return { methods, charts };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -43,17 +45,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     includedColors: get("includedColors"),
     perExtraColor: get("perExtraColor"),
     customColorFee: get("customColorFee"),
-    maxColors: get("maxColors"),
+    maxColors: "",
     leadTime: get("leadTime"),
     colorNote: get("colorNote"),
+    threadChartId: get("threadChartId"),
   });
+  if (data.threadChartId && !(await listCharts(session.shop)).some((c) => c.id === data.threadChartId)) data.threadChartId = null;
   if (errors.length) return { ok: false, error: errors.join(" ") };
   await saveMethod(session.shop, data);
   return { ok: true, message: `${data.name} saved` };
 };
 
 export default function Methods() {
-  const { methods } = useLoaderData<typeof loader>();
+  const { methods, charts } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const nav = useNavigation();
   const shopify = useAppBridge();
@@ -79,9 +83,10 @@ export default function Methods() {
     includedColors: 4,
     perExtraColor: 1,
     customColorFee: 0,
-    maxColors: 3,
+    maxColors: null,
     leadTime: "",
     colorNote: "",
+    threadChartId: null,
   };
 
   return (
@@ -93,11 +98,11 @@ export default function Methods() {
         </s-paragraph>
       </s-section>
       {methods.map((m) => (
-        <MethodForm key={m.key} m={m} busy={nav.state !== "idle"} />
+        <MethodForm key={m.key} m={m} charts={charts} busy={nav.state !== "idle"} />
       ))}
       <details className="mt-new">
         <summary>Add a method</summary>
-        <MethodForm m={blank} isNew busy={nav.state !== "idle"} />
+        <MethodForm m={blank} charts={charts} isNew busy={nav.state !== "idle"} />
       </details>
       <style>{`
         .mt-card{background:#fff;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 0 rgba(0,0,0,.07),0 0 0 1px rgba(0,0,0,.06)}
@@ -122,7 +127,7 @@ export default function Methods() {
   );
 }
 
-function MethodForm({ m, isNew, busy }: { m: MethodData; isNew?: boolean; busy: boolean }) {
+function MethodForm({ m, charts, isNew, busy }: { m: MethodData; charts: ChartSummary[]; isNew?: boolean; busy: boolean }) {
   const tiers = [...m.tiers, ...Array(Math.max(0, 6 - m.tiers.length)).fill({ min: "", price: "" })].slice(0, 6);
   return (
     <Form method="post" className="mt-card" key={JSON.stringify(m)}>
@@ -205,9 +210,14 @@ function MethodForm({ m, isNew, busy }: { m: MethodData; isNew?: boolean; busy: 
           <small>Screen print only; 0 = no extra charge</small>
         </label>
         <label className="mt-f">
-          <span>Most colors on one design</span>
-          <input name="maxColors" type="number" min="1" defaultValue={m.maxColors ?? ""} placeholder="No limit" />
-          <small>Default for every location; a location can set its own number</small>
+          <span>Thread chart</span>
+          <select name="threadChartId" defaultValue={m.threadChartId ?? ""}>
+            <option value="">None</option>
+            {charts.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <small>Suggests the vendor's thread number for each color. <a href="/app/threads">Manage charts</a></small>
         </label>
         <label className="mt-f mt-wide">
           <span>Production time shown to customers</span>

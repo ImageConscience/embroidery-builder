@@ -56,7 +56,7 @@
     var v = c.map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
     return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
   }
-  function contrast(a, b) { var la = lum(a), lb = lum(b); return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05); }
+
   function d2(a, b) { var x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return x * x + y * y + z * z; }
   function el(tag, attrs, html) {
     var e = document.createElement(tag);
@@ -299,7 +299,8 @@
   function renderLogo(logo, plain) {
     var cv = document.createElement("canvas"); cv.width = logo.w; cv.height = logo.h;
     var cx = cv.getContext("2d"), img = cx.createImageData(logo.w, logo.h), p = img.data;
-    var cols = logo.palette.map(function (c) { return hexToRgb(c.hex) || hexToRgb(c.detected); });
+    var over = logo.override && hexToRgb(logo.override); // "All white" / "All black"
+    var cols = logo.palette.map(function (c) { return over || hexToRgb(c.hex) || hexToRgb(c.detected); });
     for (var i = 0; i < logo.labels.length; i++) {
       var l = logo.labels[i]; if (l === 255) continue;
       var c = cols[l], o = i * 4;
@@ -329,10 +330,11 @@
       for (i = 0; i < n; i++) if (logo.mask[i]) { if (toCore[i] <= r + 1) fillPx++; else satinPx++; }
     } else satinPx = logo.opaque ? countMask(logo.mask) : 0;
     var fillIn = fillPx / ppi2, satinIn = satinPx / ppi2, edgeIn = logo.edges / ppi;
-    var colors = logo.palette.length;
+    var colors = logo.override ? 1 : logo.palette.length;
     var total = est.base + fillIn * est.fillPerSqIn + satinIn * est.satinPerSqIn + edgeIn * est.runPerIn + colors * est.perColor;
     return { stitches: total, low: total * (1 - est.uncertainty), high: total * (1 + est.uncertainty), fillSqIn: fillIn, satinSqIn: satinIn, outlineIn: edgeIn };
   }
+  function sizeText(pl) { return pl.w.toFixed(1) + '″ wide <span class="emb-size-h">about ' + pl.h.toFixed(1) + "″ tall</span>"; }
   function countMask(m) { var c = 0; for (var i = 0; i < m.length; i++) c += m[i]; return c; }
 
   // Same engine as the server (app/lib/methods.ts priceFor); the server prices checkout.
@@ -341,7 +343,7 @@
     var tier = tiers[0] || { min: 0, price: 0 };
     tiers.forEach(function (t) { if (qty >= t.min) tier = t; });
     var embroidery = pr.kind !== "screen_print" && pr.includedStitches != null;
-    var extraK = embroidery ? Math.max(0, Math.ceil(((stitches || 0) - pr.includedStitches) / 1000)) : 0;
+    var extraK = embroidery ? Math.max(0, Math.floor(((stitches || 0) - pr.includedStitches) / 1000)) : 0; // rounded down, like the quotes
     var perK = pr.perThousandStitches || 0;
     var extraColors = Math.max(0, colors - pr.includedColors);
     var custom = pr.kind === "screen_print" ? Math.max(0, customColors || 0) : 0;
@@ -401,6 +403,8 @@
     this.qty = Math.max(this.pricing.minimum || 1, 72);
     this.contact = { name: "", email: "", phone: "", company: "", notes: "" };
     this.rights = false;
+    this.colorMode = "original"; // original | white | black | custom
+    this.colorComment = "";
     this.error = "";
     this.drag = null;
     this.images = {};
@@ -567,8 +571,9 @@
   };
   Builder.prototype.maxLogoWidth = function (z) {
     var a = this.logo.h / this.logo.w, zi = this.zoneInches(z);
-    var maxW = Math.min(z.maxW || zi.w, zi.w), maxH = Math.min(z.maxH || zi.h, zi.h);
-    return Math.max(0.5, Math.min(maxW, maxH / a));
+    // Customers choose a width; the height follows the logo's shape and only has to fit the location.
+    var maxW = Math.min(z.maxW || zi.w, zi.w);
+    return Math.max(0.5, Math.min(maxW, zi.h / a));
   };
   Builder.prototype.getPlace = function () {
     var z = this.zone;
@@ -736,7 +741,7 @@
       self.draw();
       var s = self.panel.querySelector("[data-size]"), r = self.panel.querySelector("[data-range]");
       var pl = self.getPlace();
-      if (s && pl) s.textContent = pl.w.toFixed(1) + "″ × " + pl.h.toFixed(1) + "″";
+      if (s && pl) s.innerHTML = sizeText(pl);
       if (r && pl && document.activeElement !== r) r.value = String(pl.w);
       self.updateEstimateLine();
     });
@@ -746,7 +751,7 @@
   Builder.prototype.currentEstimate = function () {
     var pl = this.getPlace();
     if (!pl || !this.isEmbroidery()) return null;
-    var key = this.zone.id + ":" + pl.w.toFixed(2) + ":" + this.logo.palette.length;
+    var key = this.zone.id + ":" + pl.w.toFixed(2) + ":" + this.logo.palette.length + ":" + (this.logo.override || "");
     if (this.estKey !== key) { this.estKey = key; this.estVal = estimateStitches(this.logo, pl.w, this.est); }
     return this.estVal;
   };
@@ -762,7 +767,7 @@
     var inc = this.pricing.includedStitches;
     if (e.high <= inc) return "About " + fmtInt(round100(e.stitches)) + " stitches: within the " + fmtInt(inc) + " included.";
     if (e.low > inc) {
-      var k = Math.ceil((e.stitches - inc) / 1000);
+      var k = Math.floor((e.stitches - inc) / 1000);
       return "About " + fmtInt(round100(e.stitches)) + " stitches: roughly +" + money(k * this.pricing.perThousandStitches) + " per apron.";
     }
     return "About " + fmtInt(round100(e.stitches)) + " stitches: close to the " + fmtInt(inc) + " included. The proof confirms it.";
@@ -871,14 +876,16 @@
     }
   };
 
+  Builder.prototype.zoneMaxWidth = function (z0) {
+    var zi = this.zoneInches(z0);
+    return Math.min(z0.maxW || zi.w, zi.w);
+  };
   Builder.prototype.zoneLimits = function (z0) {
-    var zi = this.zoneInches(z0), lim = [];
-    var mc = z0.maxColors || (this.pricing && this.pricing.maxColors);
-    if (mc) lim.push("up to " + mc + " color" + (mc === 1 ? "" : "s"));
-    if (z0.maxStitches && this.isEmbroidery()) lim.push("up to " + fmtInt(z0.maxStitches) + " stitches");
+    var lim = [], inc = this.pricing && this.pricing.includedColors;
+    if (inc) lim.push("up to " + inc + " color" + (inc === 1 ? "" : "s") + " included in the base price");
     if (z0.minQty) lim.push(z0.minQty + " minimum");
     if (z0.qtyStep > 1) lim.push("ordered in multiples of " + z0.qtyStep);
-    return "Largest logo here: " + Math.min(z0.maxW || zi.w, zi.w).toFixed(1) + "″ wide × " + Math.min(z0.maxH || zi.h, zi.h).toFixed(1) + "″ tall" + (lim.length ? "; " + lim.join(", ") : "") + ".";
+    return "Largest width for this location: " + this.zoneMaxWidth(z0).toFixed(1) + "″" + (lim.length ? " · " + lim.join(" · ") : "") + ".";
   };
 
   Builder.prototype.stepLocation = function (p) {
@@ -930,7 +937,6 @@
         p.appendChild(keep);
       }
       if (L.lowRes) p.appendChild(el("p", { class: "emb-warn" }, "This file is small, so fine details may be hard to judge. A larger file or a vector (SVG, AI, EPS, PDF) works best."));
-      if (L.palette.length > 6) p.appendChild(el("p", { class: "emb-warn" }, "This logo has a lot of colors. Embroidery works best with fewer flat colors; you can merge them on the Colors step."));
     }
     p.appendChild(el("p", { class: "emb-help" }, "We keep your original file exactly as uploaded for production."));
     this.colorPicker(p);
@@ -985,7 +991,7 @@
       self.busy = false;
       var oldPlace = self.place;
       self.logo = logo;
-      self.logoCanvas = renderLogo(logo);
+      self.applyColorMode();
       self.place = opts.keepPlace ? oldPlace : {};
       self.estKey = null;
       self.render();
@@ -1002,13 +1008,13 @@
     ch.addEventListener("click", function () { self.go(self.stepIndex("Location")); });
     loc.appendChild(ch);
     p.appendChild(loc);
-    p.appendChild(el("p", { class: "emb-help" }, "We zoomed in on this location. Drag the logo to move it. Drag a corner or use the slider to resize. It always stays inside the dashed area."));
-    p.appendChild(el("p", { class: "emb-label" }, "Logo size"));
+    p.appendChild(el("p", { class: "emb-help" }, "We zoomed in on this location. Drag the logo to move it. Drag a corner or use the slider to set the width. It always stays inside the dashed area."));
+    p.appendChild(el("p", { class: "emb-label" }, "Logo width"));
     var range = el("input", { type: "range", class: "emb-range", min: String(pl.minW.toFixed(2)), max: String(pl.maxW.toFixed(2)), step: "0.05", value: String(pl.w), "aria-label": "Logo width in inches", "data-range": "" });
     range.addEventListener("input", function () { self.place[self.zone.id].w = parseFloat(range.value); self.scheduleUpdate(); });
     p.appendChild(range);
-    p.appendChild(el("p", { class: "emb-size", "data-size": "" }, pl.w.toFixed(1) + "″ × " + pl.h.toFixed(1) + "″"));
-    p.appendChild(el("p", { class: "emb-help" }, "Largest for " + esc(this.zone.label.toLowerCase()) + ": " + pl.maxW.toFixed(1) + "″ wide at this logo's shape."));
+    p.appendChild(el("p", { class: "emb-size", "data-size": "" }, sizeText(pl)));
+    p.appendChild(el("p", { class: "emb-help" }, "Largest width for this location: " + this.zoneMaxWidth(this.zone).toFixed(1) + "″. The height follows your logo's shape, so it's never stretched."));
     var row = el("div", { class: "emb-row" });
     var center = el("button", { type: "button", class: "emb-btn" }, "Center");
     center.addEventListener("click", function () { var q = self.place[self.zone.id]; q.cx = pl.zi.w / 2; q.cy = pl.zi.h / 2; self.render(); });
@@ -1019,57 +1025,96 @@
     p.appendChild(el("p", { class: "emb-ok", "data-est-line": "" }, this.estimateSummary(this.currentEstimate())));
     this.backgroundLine(p);
     this.problemsBox(p, ["stitches"]);
-    this.contrastWarning(p);
+  };
+
+  var COLOR_MODES = [
+    { id: "original", title: "Keep my logo's colors", text: { thread: "We'll use the closest thread to each color in your logo.", ink: "We'll use the closest ink to each color in your logo." } },
+    { id: "white", title: "All white", text: { thread: "The whole logo in white thread.", ink: "The whole logo in white ink." }, hex: "#FFFFFF" },
+    { id: "black", title: "All black", text: { thread: "The whole logo in black thread.", ink: "The whole logo in black ink." }, hex: "#111111" },
+    { id: "custom", title: "Request specific colors", text: { thread: "Give us HEX or Pantone (PMS) codes for your brand colors.", ink: "Give us HEX or Pantone (PMS) codes for your brand colors." } }
+  ];
+
+  // Re-color the preview for the chosen color option.
+  Builder.prototype.applyColorMode = function () {
+    var L = this.logo;
+    if (!L) return;
+    var mode = COLOR_MODES.filter(function (m) { return m.id === this.colorMode; }, this)[0] || COLOR_MODES[0];
+    L.override = mode.hex || null;
+    if (this.colorMode === "original") L.palette.forEach(function (c) { if (c.orig) c.hex = c.orig; c.pantone = ""; });
+    if (this.colorMode === "custom") L.palette.forEach(function (c) { if (!c.orig) c.orig = c.hex; });
+    this.logoCanvas = renderLogo(L);
+    this.estKey = null;
   };
 
   Builder.prototype.stepColors = function (p) {
     var self = this, L = this.logo;
-    var ink = !this.isEmbroidery();
+    var ink = !this.isEmbroidery(), word = ink ? "ink" : "thread";
     p.appendChild(el("h3", null, ink ? "Ink colors" : "Thread colors"));
-    p.appendChild(el("p", { class: "emb-help" }, ink
-      ? "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match" + (this.pricing.customColorFee ? " (custom ink, +" + money(this.pricing.customColorFee) + " per apron per color)" : "") + "."
-      : "We suggested a hex color for each color in your logo. Edit it, or add a Pantone code for an exact brand match. Almost any color can be matched in thread."));
     this.backgroundLine(p);
-    L.palette.forEach(function (c, i) {
-      var row = el("div", { class: "emb-color-row" });
-      var dot = el("span", { class: "emb-dot", "aria-hidden": "true" }); dot.style.background = c.hex;
-      var hex = el("input", { class: "emb-input", value: c.hex, "aria-label": "Color " + (i + 1) + " hex", maxlength: "7", spellcheck: "false" });
-      var pms = el("input", { class: "emb-input", value: c.pantone, placeholder: "Pantone (optional)", "aria-label": "Color " + (i + 1) + " Pantone", maxlength: "24" });
-      hex.addEventListener("input", function () {
-        var v = hex.value.trim(); if (v && v[0] !== "#") v = "#" + v;
-        var ok = !!hexToRgb(v); hex.setAttribute("aria-invalid", String(!ok));
-        if (ok) { c.hex = v.toUpperCase(); dot.style.background = c.hex; self.logoCanvas = renderLogo(L); self.draw(); self.refreshContrast(); }
+    var box = el("fieldset", { class: "emb-colormodes" }, "<legend class='emb-sr'>Color options</legend>");
+    COLOR_MODES.forEach(function (m) {
+      var on = self.colorMode === m.id;
+      var sw = m.hex ? '<span class="emb-dot" style="background:' + m.hex + '"></span>'
+        : m.id === "original" ? '<span class="emb-dots">' + L.palette.slice(0, 4).map(function (c) { return '<span class="emb-dot" style="background:' + esc(c.orig || c.hex) + '"></span>'; }).join("") + "</span>"
+        : '<span class="emb-dot emb-dot-custom"></span>';
+      var lab = el("label", { class: "emb-modeopt" + (on ? " is-on" : "") },
+        '<input type="radio" name="emb-colormode" class="emb-sr"' + (on ? " checked" : "") + ">" + sw +
+        "<span><strong>" + esc(m.title) + "</strong><span class='emb-help'>" + esc(m.text[word === "ink" ? "ink" : "thread"]) + "</span></span>");
+      lab.querySelector("input").addEventListener("change", function () {
+        self.colorMode = m.id; self.applyColorMode(); self.render();
       });
-      pms.addEventListener("input", function () { c.pantone = pms.value.trim(); self.refreshColorLine(); });
-      row.appendChild(dot); row.appendChild(hex); row.appendChild(pms);
-      p.appendChild(row);
+      box.appendChild(lab);
     });
-    if (L.palette.length > 1) {
-      p.appendChild(el("p", { class: "emb-help" }, "Two colors that should be one? Give them the same hex and they'll count once."));
+    p.appendChild(box);
+
+    if (this.colorMode === "custom") {
+      var adv = el("div", { class: "emb-advanced" });
+      adv.appendChild(el("p", { class: "emb-help" }, "Edit the HEX code or add a Pantone (PMS) code for each color. We'll match them as closely as " + word + " allows and show you on your proof before anything is made."));
+      L.palette.forEach(function (c, i) {
+        var row = el("div", { class: "emb-color-row" });
+        var dot = el("span", { class: "emb-dot", "aria-hidden": "true" }); dot.style.background = c.hex;
+        var hex = el("input", { class: "emb-input", value: c.hex, "aria-label": "Color " + (i + 1) + " HEX", maxlength: "7", spellcheck: "false" });
+        var pms = el("input", { class: "emb-input", value: c.pantone, placeholder: "Pantone, like 186 C (optional)", "aria-label": "Color " + (i + 1) + " Pantone", maxlength: "24" });
+        hex.addEventListener("input", function () {
+          var v = hex.value.trim(); if (v && v[0] !== "#") v = "#" + v;
+          var ok = !!hexToRgb(v); hex.setAttribute("aria-invalid", String(!ok));
+          if (ok) { c.hex = v.toUpperCase(); dot.style.background = c.hex; self.logoCanvas = renderLogo(L); self.draw(); self.refreshColorLine(); }
+        });
+        pms.addEventListener("input", function () { c.pantone = pms.value.trim(); self.refreshColorLine(); });
+        row.appendChild(dot); row.appendChild(hex); row.appendChild(pms);
+        adv.appendChild(row);
+      });
+      if (L.palette.length > 1) adv.appendChild(el("p", { class: "emb-help" }, "Two colors that should be one? Give them the same HEX and they count once."));
+      p.appendChild(adv);
     }
-    this.contrastWarning(p);
+
+    var cl = el("label", { class: "emb-label" }, "Comments about colors (optional)");
+    var ta = el("textarea", { class: "emb-input", rows: "2", maxlength: "1000", placeholder: "For example: match our sign, or the red should be darker" });
+    ta.value = this.colorComment;
+    ta.addEventListener("input", function () { self.colorComment = ta.value; });
+    cl.appendChild(ta); p.appendChild(cl);
+
     p.appendChild(el("div", { "data-color-line": "" }));
     this.refreshColorLine();
-    this.problemsBox(p, ["colors"]);
     p.appendChild(el("p", { class: "emb-help" }, (this.pricing.colorNote ? esc(this.pricing.colorNote) + " " : "") +
-      (ink || this.pricing.colorNote ? "Exact matches aren't guaranteed, and screens show color differently." : "Thread is matched to your hex or Pantone when the design is digitized. Exact matches aren't guaranteed, and screens show color differently.")));
+      "Our team picks the " + word + " and shows it on your proof for approval. Screens show color differently, so exact matches can't be guaranteed."));
   };
 
   Builder.prototype.refreshColorLine = function () {
     var box = this.panel && this.panel.querySelector("[data-color-line]");
     if (!box) return;
     var n = this.colorCount(), inc = this.pricing.includedColors, cc = this.customColorCount(), ink = !this.isEmbroidery();
-    var extra = [];
-    if (n > inc) extra.push("+" + money((n - inc) * this.pricing.perExtraColor) + " per apron for extra colors");
-    if (ink && cc && this.pricing.customColorFee) extra.push("+" + money(cc * this.pricing.customColorFee) + " per apron for " + cc + " custom Pantone ink" + (cc === 1 ? "" : "s"));
+    var parts = [n + " color" + (n === 1 ? "" : "s"), "up to " + inc + " included in the base price"];
+    if (n > inc) parts.push("+" + money((n - inc) * this.pricing.perExtraColor) + " per apron for " + (n - inc) + " extra color" + (n - inc === 1 ? "" : "s"));
+    if (ink && cc && this.pricing.customColorFee) parts.push("+" + money(cc * this.pricing.customColorFee) + " per apron for " + cc + " custom Pantone ink" + (cc === 1 ? "" : "s"));
     box.innerHTML = "";
-    box.appendChild(el("p", { class: extra.length ? "emb-warn" : "emb-ok" },
-      n + " color" + (n === 1 ? "" : "s") + " · " + inc + " included in the base price" + (extra.length ? " · " + extra.join(" · ") : "")));
+    box.appendChild(el("p", { class: "emb-help emb-colorline" }, parts.join(" · ")));
     this.refreshProblems();
   };
 
   // Custom (Pantone) colors, counted once each. Screen printing charges extra for these.
   Builder.prototype.customColorCount = function () {
+    if (this.colorMode !== "custom") return 0;
     var g = this.colorGroups(), seen = {};
     Object.keys(g).forEach(function (hex) { if (g[hex]) seen[g[hex]] = 1; });
     return Object.keys(seen).length;
@@ -1079,9 +1124,7 @@
   Builder.prototype.problems = function () {
     var out = [], z = this.zone || {}, m = this.pricing;
     if (!this.logo) return out;
-    var maxC = z.maxColors || m.maxColors || Infinity; // location limit wins over the method default
-    var n = this.colorCount();
-    if (n > maxC) out.push({ kind: "colors", text: esc(z.label || "This location") + " allows up to " + maxC + " color" + (maxC === 1 ? "" : "s") + " for " + esc(m.name.toLowerCase()) + "; your design has " + n + ". Give similar colors the same hex to merge them." });
+    // No color limit: extra colors are simply charged.
     var e = this.currentEstimate();
     if (e && z.maxStitches && e.stitches > z.maxStitches) out.push({ kind: "stitches", text: "About " + fmtInt(round100(e.stitches)) + " stitches is more than " + esc(z.label || "this location") + " allows (" + fmtInt(z.maxStitches) + "). Make the logo smaller or simpler." });
     var minQ = this.minimum();
@@ -1104,50 +1147,6 @@
     this.updateSubmit();
   };
 
-  // Distinct colors after the customer's edits (identical hex counts once).
-  // Average apron color inside the selected location (null if the photo can't be read).
-  Builder.prototype.fabricColor = function () {
-    if (!this.productImg || !this.zone) return null;
-    var key = this.productImg.src + "|" + this.zone.id;
-    if (this.fabricKey === key) return this.fabricVal;
-    var z = this.zone, img = this.productImg, cv = document.createElement("canvas");
-    cv.width = 40; cv.height = 40;
-    var val = null;
-    try {
-      var cx = cv.getContext("2d", { willReadFrequently: true });
-      cx.drawImage(img, z.x * img.naturalWidth, z.y * img.naturalHeight, z.w * img.naturalWidth, z.h * img.naturalHeight, 0, 0, 40, 40);
-      var d = cx.getImageData(0, 0, 40, 40).data, t = [0, 0, 0], c = 0;
-      for (var i = 0; i < d.length; i += 4) { t[0] += d[i]; t[1] += d[i + 1]; t[2] += d[i + 2]; c++; }
-      val = [t[0] / c, t[1] / c, t[2] / c];
-    } catch (e) { val = null; }
-    this.fabricKey = key; this.fabricVal = val;
-    return val;
-  };
-
-  // Colors that will be hard to see on this apron.
-  Builder.prototype.lowContrast = function () {
-    var fab = this.fabricColor(), L = this.logo;
-    if (!fab || !L) return [];
-    return L.palette.filter(function (c) {
-      var rgb = hexToRgb(c.hex);
-      return rgb && c.count / L.opaque >= 0.08 && contrast(rgb, fab) < 1.6;
-    });
-  };
-  Builder.prototype.contrastWarning = function (p) {
-    var box = el("div", { "data-contrast": "" });
-    p.appendChild(box);
-    this.refreshContrast(box);
-  };
-  Builder.prototype.refreshContrast = function (box) {
-    box = box || (this.panel && this.panel.querySelector("[data-contrast]"));
-    if (!box) return;
-    box.innerHTML = "";
-    var low = this.lowContrast();
-    if (!low.length) return;
-    box.appendChild(el("p", { class: "emb-warn" }, (low.length === 1 ? "The color " : "The colors ") + esc(low.map(function (c) { return c.hex; }).join(", ")) +
-      (low.length === 1 ? " is" : " are") + " close to the apron color and may be hard to see. Try a lighter or darker thread on the Colors step, or a different apron color."));
-  };
-
   // Colors that share a hex are one color; a Pantone code entered on any of them names that color.
   Builder.prototype.colorGroups = function () {
     var groups = {};
@@ -1159,9 +1158,17 @@
     return groups;
   };
   Builder.prototype.colorCount = function () {
+    if (this.colorMode === "white" || this.colorMode === "black") return 1;
     var g = this.colorGroups(), seen = {};
     Object.keys(g).forEach(function (hex) { seen[g[hex] || hex] = 1; });
     return Object.keys(seen).length;
+  };
+
+  Builder.prototype.colorsLabel = function () {
+    if (this.colorMode === "white") return "All white";
+    if (this.colorMode === "black") return "All black";
+    var list = this.logo.palette.map(function (c) { return this.colorMode === "custom" && c.pantone ? c.pantone : c.hex; }, this).join(", ");
+    return (this.colorMode === "original" ? "Logo colors, closest match: " : "Requested: ") + list;
   };
 
   Builder.prototype.apronPrice = function () {
@@ -1190,7 +1197,7 @@
     var qty = el("input", { type: "number", class: "emb-input", min: "1", step: String(this.zone.qtyStep || 1), value: String(this.qty), "aria-label": "Quantity", inputmode: "numeric" });
     qty.addEventListener("change", function () { self.qty = Math.max(1, parseInt(qty.value, 10) || 1); self.render(); });
     p.appendChild(qty);
-    this.problemsBox(p, ["qty", "colors", "stitches"]);
+    this.problemsBox(p, ["qty", "stitches"]);
     var rows = [];
     var label = m.kind === "screen_print" ? "Screen printing" : "Embroidery";
     if (q.aprons != null) rows.push([this.qty + " aprons × " + money(this.apronPrice()), money(q.aprons)]);
@@ -1213,7 +1220,7 @@
     }
     var q = this.quote(), pl = this.getPlace();
     p.appendChild(el("h3", null, "Review and check out"));
-    var colors = this.logo.palette.map(function (c) { return c.pantone ? c.pantone : c.hex; }).join(", ");
+    var colors = this.colorsLabel();
     var spec = [
       ["Apron", (this.cfg.product ? this.cfg.product.title : "") + (this.variant ? " · " + this.variant.title : "")],
       ["Method", this.pricing.name],
@@ -1273,7 +1280,11 @@
         zone: { id: this.zone.id, label: this.zone.label },
         size: { widthIn: +pl.w.toFixed(2), heightIn: +pl.h.toFixed(2) },
         position: { centerXIn: +pl.cx.toFixed(2), centerYIn: +pl.cy.toFixed(2), zoneWidthIn: +pl.zi.w.toFixed(2), zoneHeightIn: +pl.zi.h.toFixed(2) },
-        colors: this.logo.palette.map(function (c) { return { detected: c.detected, hex: c.hex, pantone: c.pantone, share: +(c.count / self.logo.opaque).toFixed(3) }; }),
+        colors: this.logo.override
+          ? [{ detected: this.logo.palette[0] ? this.logo.palette[0].detected : this.logo.override, hex: this.logo.override === "#111111" ? "#000000" : this.logo.override, pantone: "", share: 1 }]
+          : this.logo.palette.map(function (c) { return { detected: c.detected, hex: c.hex, pantone: self.colorMode === "custom" ? c.pantone : "", share: +(c.count / self.logo.opaque).toFixed(3) }; }),
+        colorChoice: this.colorMode,
+        colorComment: this.colorComment.trim().slice(0, 1000),
         colorCount: this.colorCount(),
         customColorCount: this.customColorCount(),
         estimate: e ? { stitches: Math.round(e.stitches), low: Math.round(e.low), high: Math.round(e.high), fillSqIn: +e.fillSqIn.toFixed(2), satinSqIn: +e.satinSqIn.toFixed(2), outlineIn: +e.outlineIn.toFixed(1) } : null,

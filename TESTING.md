@@ -17,9 +17,11 @@ Run this top to bottom on the dev store before installing on apronwarehouse.com.
 
 ## 2. Customer flow (desktop, then phone)
 - [ ] Method step shows both methods with "from" price, minimum and production time.
-- [ ] Location limits work: logo can't exceed max size; >3 colors, too many stitches, below minimum quantity and wrong quantity multiple each block checkout with a clear message.
+- [ ] Location limits work: logo can't exceed max size; too many stitches, below minimum quantity and wrong quantity multiple each block checkout with a clear message.
 - [ ] Switch method after uploading: logo stays, location re-picks.
 - [ ] Background keep/remove both look right on the mockup.
+- [ ] Colors step: Keep my colors, All white, All black and Request specific colors each update the preview; extra colors add the per-color charge; the color comment shows on the design page.
+- [ ] Thread charts: download the Seaside chart, edit one row, upload it back; the design page shows the suggested thread for each color.
 - [ ] Price on the Price step matches the Methods page math for 2 quantities (e.g. 50 and 150).
 - [ ] Checkout opens with 3 lines (apron, "Method: Location (size)", setup) and the totals match.
 - [ ] Phone: whole flow works by touch (drag/resize the logo, upload from the camera roll), nothing runs off the screen.

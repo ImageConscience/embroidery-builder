@@ -22,6 +22,7 @@ const toData = (m: any): MethodData => ({
   maxColors: m.maxColors,
   leadTime: m.leadTime,
   colorNote: m.colorNote,
+  threadChartId: m.threadChartId ?? null,
 });
 
 // Create ApronWarehouse's default methods the first time a shop uses the app.
