@@ -5,7 +5,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getSettings, isSlackWebhook, notify } from "../lib/notify.server";
+import { emailStaff, getSettings, isSlackWebhook, notify } from "../lib/notify.server";
+import { emailConfigured, emailProvider, isEmail } from "../lib/email.server";
 
 // Settings: Slack notifications for the team, and problems the app ran into.
 
@@ -14,6 +15,7 @@ const KIND: Record<string, string> = {
   upload_failed: "File kept in app",
   submit_error: "Submit error",
   notify_failed: "Slack failed",
+  email_failed: "Email failed",
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -32,6 +34,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     webhookHint: s.slackWebhook ? `…${s.slackWebhook.slice(-6)}` : "",
     notifyNew: s.notifyNew,
     notifyReply: s.notifyReply,
+    contactEmail: s.contactEmail ?? "",
+    emailNew: s.emailNew,
+    emailReady: emailConfigured(),
+    emailProvider: emailProvider(),
     showResolved,
     alerts: alerts.map((a) => ({ ...a, createdAt: a.createdAt.toISOString(), resolvedAt: a.resolvedAt?.toISOString() ?? null })),
   };
@@ -52,6 +58,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (clear) data.slackWebhook = null;
     await prisma.shopSettings.upsert({ where: { shop }, create: { shop, ...data }, update: data });
     return { ok: true, message: "Settings saved" };
+  }
+  if (intent === "saveEmail") {
+    const contactEmail = String(f.get("contactEmail") || "").trim().slice(0, 200);
+    if (contactEmail && !isEmail(contactEmail)) return { ok: false, error: "That doesn't look like an email address." };
+    const data = { contactEmail: contactEmail || null, emailNew: f.get("emailNew") === "on" };
+    await prisma.shopSettings.upsert({ where: { shop }, create: { shop, ...data }, update: data });
+    return { ok: true, message: "Email settings saved" };
+  }
+  if (intent === "testEmail") {
+    try {
+      const sent = await emailStaff(shop, { kind: "test", subject: "Test from Imprint Customizer", text: "This is a test. Customer messages, change requests and new designs will arrive at this address. Reply to a customer's email to answer them directly." });
+      return sent ? { ok: true, message: "Test email sent" } : { ok: false, error: "Add an email address (and make sure email is set up on the server) first." };
+    } catch (e) {
+      return { ok: false, error: `The email couldn't be sent: ${String((e as Error).message ?? e).slice(0, 200)}` };
+    }
   }
   if (intent === "test") {
     try {
@@ -87,6 +108,39 @@ export default function Settings() {
 
   return (
     <s-page heading="Settings">
+      <div className="st-card">
+        <h2>Customer messages by email</h2>
+        <p className="st-muted">
+          Customers write to you from their design page (questions, change requests). Their message is emailed to this
+          address with their email as the reply-to, so you answer straight from your inbox. Nobody needs to log in to the app to reply.
+        </p>
+        {!d.emailReady ? (
+          <p className="st-warn">
+            Email isn't switched on for the app yet, so customers see an "email us" link instead of the form. To switch it on,
+            the app's server needs <code>RESEND_API_KEY</code> (or <code>SMTP_URL</code>) and <code>EMAIL_FROM</code>.
+          </p>
+        ) : (
+          <p className="st-muted">Sending through {d.emailProvider}.</p>
+        )}
+        <Form method="post" className="st-form">
+          <input type="hidden" name="intent" value="saveEmail" />
+          <label className="st-f">
+            <span>Send customer messages to</span>
+            <input name="contactEmail" type="email" defaultValue={d.contactEmail} placeholder="lindsey@example.com" autoComplete="off" />
+          </label>
+          <label className="st-check"><input type="checkbox" name="emailNew" defaultChecked={d.emailNew} /> Also email each new design</label>
+          <div className="st-actions">
+            <button className="st-btn" type="submit" disabled={busy}>Save</button>
+          </div>
+        </Form>
+        {d.contactEmail && d.emailReady ? (
+          <Form method="post">
+            <input type="hidden" name="intent" value="testEmail" />
+            <button className="st-btn alt" type="submit" disabled={busy}>Send a test email</button>
+          </Form>
+        ) : null}
+      </div>
+
       <div className="st-card">
         <h2>Team notifications (Slack)</h2>
         <p className="st-muted">
@@ -165,6 +219,7 @@ export default function Settings() {
         .st-card h2{font-size:16px;margin:0 0 8px}
         .st-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
         .st-muted{color:#616161;font-size:13px}
+        .st-warn{background:#fff4e5;border-radius:8px;padding:8px 12px;font-size:13px}
         .st-form{display:flex;flex-direction:column;gap:10px;margin:12px 0}
         .st-f{display:flex;flex-direction:column;gap:4px;font-size:13px}
         .st-f span{font-weight:500}

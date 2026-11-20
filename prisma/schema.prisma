@@ -130,6 +130,8 @@ model ShopSettings {
   slackWebhook String? // Slack incoming webhook: new designs, customer replies and problems are posted here
   notifyNew    Boolean  @default(true)
   notifyReply  Boolean  @default(true)
+  contactEmail String? // customer messages and change requests are emailed here (e.g. Lindsey)
+  emailNew     Boolean  @default(true) // also email each new design to contactEmail
   updatedAt    DateTime @default(now()) @updatedAt
 }
 
@@ -161,4 +163,12 @@ model ThreadChart {
   updatedAt DateTime @default(now()) @updatedAt
 
   @@index([shop])
+}
+
+// Apron volume discount tiers (see app/lib/volume.ts), uploaded and downloaded as CSV.
+model VolumeDiscounts {
+  shop      String   @id
+  rows      Json
+  fileName  String   @default("")
+  updatedAt DateTime @default(now()) @updatedAt
 }

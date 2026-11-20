@@ -1,4 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
+import { volumeDiscountFor } from "../lib/volume.server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { uploadToShopifyFiles } from "../lib/files.server";
@@ -6,7 +7,7 @@ import { createCheckout } from "../lib/checkout.server";
 import { checkDesign } from "../lib/validate.server";
 import { firstDecoration } from "../lib/spec";
 import { addEvent, customerLink, newToken } from "../lib/design.server";
-import { adminDesignLink, notify, raiseAlert, slackLink } from "../lib/notify.server";
+import { adminDesignLink, emailStaff, notify, raiseAlert, slackLink } from "../lib/notify.server";
 
 // Storefront submission: POST https://<shop>/apps/imprint/submit (multipart form).
 // Saves the design, then creates a draft order priced on the server and returns its checkout link.
@@ -57,7 +58,8 @@ async function submit({ request }: ActionFunctionArgs) {
   if (!(logo instanceof File) || logo.size === 0) return bad("Please upload your logo.");
   if (logo.size > MAX_LOGO) return bad("That logo file is over 20 MB.");
   if (email && !/.+@.+\..+/.test(email)) return bad("Please check your email address.");
-  if (str(form.get("rights")) !== "yes") return bad("Please confirm you have the rights to use this logo.");
+  // Clicking "Continue to checkout" certifies the customer has the rights to the logo (stated under the button).
+  if (!["yes", "certified"].includes(str(form.get("rights")))) return bad("Please reload the page and try again.");
 
   let spec: any;
   try {
@@ -72,6 +74,12 @@ async function submit({ request }: ActionFunctionArgs) {
   if (!checked.ok) return bad(checked.error);
   const { method, quantity, stitches, price } = checked;
   spec.serverPrice = price;
+  // Apron volume discount (mirrors the store's volume discount app), applied to the apron line.
+  const volume = await volumeDiscountFor(admin, session.shop, spec?.product?.id, quantity).catch((e) => {
+    console.error("volume discount lookup failed", e);
+    return { percent: 0, min: 0, label: "" };
+  });
+  spec.volumeDiscount = volume;
   const deco = firstDecoration(spec)!;
 
   const logoBytes = new Uint8Array(await logo.arrayBuffer());
@@ -172,6 +180,8 @@ async function submit({ request }: ActionFunctionArgs) {
       perApron: price.perPiece,
       setupFee: price.setupFee,
       designUrl,
+      volumePercent: volume.percent,
+      volumeMin: volume.min,
     });
     update.draftOrderId = co.draftOrderId;
     update.checkoutUrl = co.checkoutUrl;
@@ -197,6 +207,13 @@ async function submit({ request }: ActionFunctionArgs) {
       submissionId: sub.id,
     });
   }
+  await emailStaff(session.shop, {
+    kind: "new",
+    submissionId: sub.id,
+    replyTo: email || undefined,
+    subject: `[${ref}] New design: ${quantity} × ${spec?.product?.title ?? "apron"}`,
+    text: `New design ${ref}${name || email ? ` from ${name || email}` : ""}.\n\n${quantity} × ${spec?.product?.title ?? "apron"}${spec?.variant?.title ? ` (${spec.variant.title})` : ""}\n${method.name}, ${deco.zone?.label ?? ""}, ${deco.size?.widthIn ?? "?"}″ wide\nTotal $${price.total.toFixed(2)} for the decoration and setup. Not paid yet.\n\nOpen the design in the app: ${adminDesignLink(session.shop, sub.id)}\nCustomer's design page: ${designUrl}`,
+  });
   await notify(
     session.shop,
     "new",

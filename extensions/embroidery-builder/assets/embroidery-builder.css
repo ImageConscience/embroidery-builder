@@ -15,10 +15,17 @@
 .emb-head{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid #E6DFD2}
 .emb-head h2{flex:1;margin:0;font-size:20px;line-height:1.2}
 .emb-close{border:0;background:none;font-size:28px;line-height:1;cursor:pointer;color:#4A5563;padding:4px 8px}
-.emb-steps{display:flex;gap:6px;padding:10px 20px;border-bottom:1px solid #E6DFD2;overflow-x:auto}
-.emb-step{flex:none;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:700;background:#EFE9DD;color:#4A5563;border:0;cursor:pointer;font-family:inherit}
-.emb-step[aria-current="step"]{background:#1F2A36;color:#fff}
-.emb-step[disabled]{opacity:.5;cursor:default}
+/* Steps: a bold progress bar across the top (scrolls sideways on phones). */
+.emb-steps{display:flex;gap:8px;padding:12px 20px;border-bottom:1px solid #E6DFD2;overflow-x:auto;background:#F6F2EA;scrollbar-width:none}
+.emb-steps::-webkit-scrollbar{display:none}
+.emb-step{flex:1 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:8px 14px;border-radius:10px;font-size:15px;font-weight:800;background:#fff;color:#4A5563;border:2px solid #E0D8C9;cursor:pointer;font-family:inherit;white-space:nowrap}
+.emb-step .emb-num{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#EFE9DD;color:#1F2A36;font-size:13px}
+.emb-step.is-done{border-color:#2F6F73;color:#1F5457}
+.emb-step.is-done .emb-num{background:#2F6F73;color:#fff}
+.emb-step[aria-current="step"]{background:#1F2A36;border-color:#1F2A36;color:#fff}
+.emb-step[aria-current="step"] .emb-num{background:var(--emb-accent,#B44A31);color:#fff}
+.emb-step[disabled]{opacity:.45;cursor:default}
+.emb-step:focus-visible{outline:2px solid var(--emb-accent,#B44A31);outline-offset:2px}
 .emb-body{display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0;flex:1;overflow:hidden}
 @media (max-width:860px){.emb-body{grid-template-columns:1fr;overflow:auto}}
 .emb-stage{position:relative;background:#EFE9DD;display:flex;align-items:center;justify-content:center;padding:16px;min-height:360px}
@@ -98,3 +105,44 @@
 .emb-advanced{display:grid;gap:8px;margin:0 0 12px;padding:12px;border-radius:10px;background:#FBF8F3;border:1px solid #E6DFD2}
 .emb-colorline{font-weight:500}
 .emb-size-h{display:block;font-size:13px;font-weight:400;color:#6B6358;margin-top:2px}
+
+/* Swatches and plain color names */
+.emb-sw{display:inline-block;width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.25);vertical-align:-4px;margin-right:6px;flex:0 0 18px}
+.emb-colorlist{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.emb-colorlist li{display:flex;align-items:center;gap:4px;padding:8px 10px;border:1px solid #E6DFD2;border-radius:10px;background:#fff;font-size:14px;font-weight:600}
+.emb-colorlist li .emb-help{margin-left:auto;font-weight:400}
+.emb-colorlist .emb-sw{width:24px;height:24px;flex-basis:24px}
+.emb-swname{display:inline-flex;align-items:center;margin:0 0 4px 10px;white-space:nowrap}
+.emb-spec td:last-child{line-height:1.6}
+/* Quantity stepper and rule notes */
+.emb-qty{display:flex;gap:8px;align-items:stretch;max-width:260px}
+.emb-qty .emb-input{text-align:center;font-size:16px;font-weight:700}
+.emb-qbtn{min-width:44px;font-size:20px;line-height:1;padding:0 12px}
+.emb-note{padding:10px 12px;border-radius:10px;background:#FFF4D6;color:#5A4410;font-size:13px;line-height:1.4;margin:0}
+.emb-nexttier{color:#1F5457;font-weight:600}
+.emb-disclaimer{font-size:12px}
+/* Next button: wide and clear about what comes next */
+.emb-foot [data-next].emb-primary{width:auto;min-width:220px}
+/* Phones */
+@media (max-width:760px){
+  .emb-dialog{height:100dvh;max-height:100dvh}
+  .emb-head{padding:10px 14px}
+  .emb-head h2{font-size:16px}
+  .emb-steps{padding:8px 12px;gap:6px}
+  .emb-step{flex:0 0 auto;font-size:14px;min-height:40px;padding:6px 12px}
+  .emb-panel{padding:14px 14px 20px;gap:12px}
+  .emb-foot{padding:10px 12px calc(10px + env(safe-area-inset-bottom));gap:8px}
+  .emb-foot .emb-btn,.emb-foot .emb-primary{font-size:15px;padding:12px 14px}
+  .emb-foot [data-next].emb-primary{min-width:0;flex:1}
+  .emb-input,.emb-panel textarea,.emb-panel select{font-size:16px}
+  .emb-color-row{grid-template-columns:32px 1fr;}
+  .emb-color-row .emb-input:last-child{grid-column:2}
+  .emb-spec td{display:block;text-align:left !important;padding:2px 0}
+  .emb-spec td:first-child{padding-top:8px;font-weight:400;opacity:.75}
+  .emb-swname{margin:0 10px 4px 0}
+  .emb-bgimg{flex-basis:56px;height:56px}
+  .emb-table{font-size:13px}
+  .emb-big{font-size:28px}
+  .emb-total{font-size:15px}
+  .emb-chip{min-height:40px}
+}

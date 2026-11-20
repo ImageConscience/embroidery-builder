@@ -89,6 +89,7 @@
           "handle": {{ product.handle | json }},
           "title": {{ product.title | json }},
           "vendor": {{ product.vendor | json }},
+          "collections": {{ product.collections | map: 'handle' | json }},
           "url": {{ product.url | json }}
         },
         "variants": [

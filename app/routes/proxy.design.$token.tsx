@@ -4,7 +4,11 @@ import prisma from "../db.server";
 import { draftOrderStatus } from "../lib/checkout.server";
 import { addEvent, fileLinks, stageLabel } from "../lib/design.server";
 import { firstDecoration } from "../lib/spec";
-import { adminDesignLink, notify, slackLink } from "../lib/notify.server";
+import { adminDesignLink, emailStaff, getSettings, notify, slackLink } from "../lib/notify.server";
+import { emailConfigured, escHtml, isEmail } from "../lib/email.server";
+
+// Subject lines for the customer's message, so staff can sort them at a glance.
+const TOPICS = ["Question about my design", "Change something on my design", "Order, payment or shipping", "Something else"];
 
 // The customer's design page: https://<shop>/apps/imprint/design/<token>
 // Rendered by the store theme (Liquid response through the app proxy). Shows the mockup or proof,
@@ -48,6 +52,8 @@ function page(title: string, body: string) {
 .embd details{border:1px solid rgba(0,0,0,.12);border-radius:10px;padding:10px 14px}
 .embd summary{cursor:pointer;font-weight:600}
 .embd .note{font-size:13px;opacity:.75}
+.embd select,.embd input[type=email],.embd input[type=text]{width:100%;box-sizing:border-box;font:inherit;padding:10px;border:1px solid rgba(0,0,0,.3);border-radius:8px;margin:4px 0 8px}
+.embd label.f{display:block;font-size:14px;font-weight:600;margin-top:8px}
 </style>
 <h1>${esc(title)}</h1>
 ${body}
@@ -61,7 +67,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     token.length >= 16 && session
       ? await prisma.submission.findFirst({
           where: { token, shop: session.shop },
-          include: { messages: { where: { kind: "message" }, orderBy: { createdAt: "asc" } } },
         })
       : null;
   if (!s) {
@@ -95,7 +100,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
   if (done === "approved") status = `<div class="status ok"><strong>Thank you, your design is approved.</strong> We'll start production.</div>`;
   if (done === "changes") status = `<div class="status"><strong>Thanks, we have your changes.</strong> We'll post an updated proof here.</div>`;
-  if (done === "message") status += `<div class="status">Your message was sent to our team.</div>`;
+  if (done === "message") status += `<div class="status ok">Thanks, your message was sent to our team. We'll reply by email.</div>`;
+  if (done === "error") status += `<div class="status">Your message couldn't be sent. Please email us instead using the link below.</div>`;
 
   const payBox =
     !paid && s.checkoutUrl && payment && s.stage !== "cancelled"
@@ -116,11 +122,25 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     ["Status", esc(stageLabel(s.stage))],
   ];
 
-  const thread = s.messages.length
-    ? `<ul class="thread">${s.messages
-        .map((m) => `<li class="${m.author === "customer" ? "me" : ""}"><div class="who">${m.author === "customer" ? "You" : esc(m.authorName || "Our team")} · ${esc(when(m.createdAt))}</div><div class="txt">${esc(m.body)}</div></li>`)
-        .join("")}</ul>`
-    : `<p class="note">No messages yet.</p>`;
+  const settings = await getSettings(s.shop);
+  const canEmail = !!settings.contactEmail && emailConfigured();
+  const mailto = settings.contactEmail
+    ? `mailto:${settings.contactEmail}?subject=${encodeURIComponent(`Design ${ref}: question`)}&body=${encodeURIComponent(`Design ${ref}\n\n`)}`
+    : "";
+  const contact = canEmail
+    ? `<h2 style="font-size:20px;margin:28px 0 4px">Contact our team</h2>
+    <p class="note">We'll reply by email, usually within one business day.</p>
+    <form method="post" action="${action}"><input type="hidden" name="intent" value="message">
+      <label class="f" for="emb-topic">What's it about?</label>
+      <select id="emb-topic" name="topic">${TOPICS.map((t) => `<option>${esc(t)}</option>`).join("")}</select>
+      <label class="f" for="emb-email">Your email</label>
+      <input id="emb-email" type="email" name="email" required value="${esc(s.email ?? "")}" autocomplete="email">
+      <label class="f" for="emb-body">Message</label>
+      <textarea id="emb-body" name="body" rows="4" required placeholder="How can we help?"></textarea>
+      <button class="btn alt" type="submit">Send</button></form>`
+    : mailto
+      ? `<h2 style="font-size:20px;margin:28px 0 4px">Questions?</h2><p><a class="btn alt" href="${esc(mailto)}">Email our team</a></p><p class="note">Mention design ${esc(ref)}.</p>`
+      : `<p class="note">Questions? Contact us and mention design ${esc(ref)}.</p>`;
 
   const decide =
     s.stage === "proof_sent"
@@ -143,12 +163,8 @@ ${status}${payBox}
   <div>
     <table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>
     ${decide}
-    <h2 style="font-size:20px;margin:28px 0 0">Messages</h2>
-    ${thread}
-    <form method="post" action="${action}"><input type="hidden" name="intent" value="message">
-      <textarea name="body" rows="3" required placeholder="Write to our team"></textarea>
-      <button class="btn alt" type="submit">Send message</button></form>
-    <p class="note">Keep this link: it's how you'll see proofs and replies for this design.</p>
+    ${contact}
+    <p class="note">Keep this link: it's where your proof appears.</p>
   </div>
 </div>`;
   return liquid(page(`Your custom design`, body));
@@ -163,13 +179,28 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = String(form.get("intent") || "");
   const body = String(form.get("body") || "").trim().slice(0, 5000);
-  const link = slackLink(adminDesignLink(s.shop, s.id), `EMB-${s.number}`);
+  const ref = `EMB-${s.number}`;
+  const link = slackLink(adminDesignLink(s.shop, s.id), ref);
+  const replyTo = String(form.get("email") || s.email || "").trim().slice(0, 200);
+  const who = [s.customerName, isEmail(replyTo) ? replyTo : s.email].filter(Boolean).join(", ") || "the customer";
+  const customerPage = `https://${s.shop}/apps/imprint/design/${encodeURIComponent(token)}`;
+  // Email staff (Lindsey) with the customer as reply-to, so she answers from her inbox.
+  const mail = (subject: string, intro: string, msg = "") =>
+    emailStaff(s.shop, {
+      kind: "message",
+      submissionId: s.id,
+      replyTo: isEmail(replyTo) ? replyTo : s.email ?? undefined,
+      subject: `[${ref}] ${subject}`,
+      text: `${intro}\n\nFrom: ${who}\n${s.productTitle ?? ""}${s.variantTitle ? ` (${s.variantTitle})` : ""} · ${s.zoneLabel ?? ""} · ${s.quantity ?? ""} aprons\n${msg ? `\n${msg}\n` : ""}\nOpen the design in the app: ${adminDesignLink(s.shop, s.id)}\nCustomer's design page: ${customerPage}\n\nReply to this email to answer the customer.`,
+      html: `<p>${escHtml(intro)}</p><p><strong>From:</strong> ${escHtml(who)}<br>${escHtml(s.productTitle ?? "")}${s.variantTitle ? ` (${escHtml(s.variantTitle)})` : ""} · ${escHtml(s.zoneLabel ?? "")} · ${escHtml(s.quantity ?? "")} aprons</p>${msg ? `<blockquote style="border-left:3px solid #ccc;margin:0;padding:4px 12px;white-space:pre-wrap">${escHtml(msg)}</blockquote>` : ""}<p><a href="${escHtml(adminDesignLink(s.shop, s.id))}">Open the design in the app</a> · <a href="${escHtml(customerPage)}">Customer's design page</a></p><p style="color:#666">Reply to this email to answer the customer.</p>`,
+    });
   const quote = (t: string) => t.slice(0, 300).replace(/[<>&]/g, " ").replace(/\n/g, " ");
 
   if (intent === "approve" && s.stage === "proof_sent" && form.get("confirm") === "yes") {
     await prisma.submission.update({ where: { id: s.id }, data: { stage: "approved", approvedAt: new Date(), attention: true } });
     await addEvent(s.id, "Customer approved the proof.", "customer");
     await notify(s.shop, "reply", `:white_check_mark: ${link} approved: the customer approved the proof. Ready for production.`);
+    await mail("Proof approved", "The customer approved the proof. It's ready for production.");
     return back("approved");
   }
   if (intent === "changes" && body) {
@@ -177,13 +208,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     await prisma.submission.update({ where: { id: s.id }, data: { stage: "changes_requested", attention: true } });
     await addEvent(s.id, "Customer asked for changes.", "customer");
     await notify(s.shop, "reply", `:pencil2: ${link}: the customer asked for changes: "${quote(body)}"`);
+    await mail("Changes requested on the proof", "The customer asked for changes to the proof.", body);
     return back("changes");
   }
   if (intent === "message" && body) {
-    await prisma.message.create({ data: { submissionId: s.id, kind: "message", author: "customer", body } });
+    const topic = TOPICS.includes(String(form.get("topic"))) ? String(form.get("topic")) : "Message";
+    if (isEmail(replyTo) && !s.email) await prisma.submission.update({ where: { id: s.id }, data: { email: replyTo } });
+    await prisma.message.create({ data: { submissionId: s.id, kind: "message", author: "customer", body: `${topic}: ${body}` } });
     await prisma.submission.update({ where: { id: s.id }, data: { attention: true } });
-    await notify(s.shop, "reply", `:speech_balloon: ${link}: new message from the customer: "${quote(body)}"`);
-    return back("message");
+    await notify(s.shop, "reply", `:speech_balloon: ${link}: ${topic.toLowerCase()} from the customer: "${quote(body)}"`);
+    const sent = await mail(topic, `New message from the customer: ${topic}.`, body);
+    return back(sent ? "message" : "error");
   }
   return back("none");
 };

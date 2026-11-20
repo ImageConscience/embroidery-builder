@@ -15,6 +15,8 @@ export type CheckoutInput = {
   perApron: number;
   setupFee: number;
   designUrl?: string;
+  volumePercent?: number; // apron volume discount, % off the apron line
+  volumeMin?: number;
 };
 
 // Create a draft order (aprons + embroidery + setup) and return its checkout link.
@@ -44,6 +46,9 @@ export async function createCheckout(admin: AdminLike, c: CheckoutInput) {
               variantId: String(c.variantId).startsWith("gid://") ? c.variantId : `gid://shopify/ProductVariant/${c.variantId}`,
               quantity: c.quantity,
               customAttributes: [design],
+              ...(c.volumePercent && c.volumePercent > 0
+                ? { appliedDiscount: { valueType: "PERCENTAGE", value: c.volumePercent, title: `Volume discount (${c.volumeMin}+)`, description: `${c.volumePercent}% off for ${c.volumeMin} or more` } }
+                : {}),
             },
             {
               title: `${c.methodName}: ${c.zoneLabel} (${c.sizeLabel})`,

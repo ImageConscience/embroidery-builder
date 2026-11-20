@@ -332,7 +332,7 @@ export default function DesignPage() {
         </table>
       </s-section>
 
-      <s-section heading="Conversation and history">
+      <s-section heading="Messages and history">
         <ol className="ds-timeline">
           {d.messages.map((m) => (
             <li key={m.id} className={`ds-msg ds-${m.kind} ds-by-${m.author}`}>
@@ -345,15 +345,24 @@ export default function DesignPage() {
             </li>
           ))}
         </ol>
+        {(() => {
+          const em = d.payment?.orderEmail || d.customer.email;
+          return em ? (
+            <p className="ds-note">
+              Customers write to you by email from their design page. To reply or send news,{" "}
+              <a href={`mailto:${em}?subject=${encodeURIComponent(`Your embroidery design ${d.ref}`)}&body=${encodeURIComponent(`You can see your design and proof here: ${d.customerUrl}`)}`}>email the customer</a>.
+            </p>
+          ) : (
+            <p className="ds-note">Customers write to you by email from their design page. Their email address shows here once they check out.</p>
+          );
+        })()}
         <Form method="post" ref={msgForm} className="ds-compose">
           <input type="hidden" name="intent" value="message" />
-          <textarea name="body" rows={3} placeholder="Write to the customer, or add a note for your team" aria-label="Message" />
+          <input type="hidden" name="visibility" value="note" />
+          <textarea name="body" rows={2} placeholder="Add a note for your team (customers don't see notes)" aria-label="Internal note" />
           <div className="ds-compose-row">
-            <label><input type="radio" name="visibility" value="message" defaultChecked /> Message to customer (shows on their design page)</label>
-            <label><input type="radio" name="visibility" value="note" /> Internal note</label>
-            <button type="submit" className="ds-btn" disabled={busy}>Add</button>
+            <button type="submit" className="ds-btn" disabled={busy}>Add note</button>
           </div>
-          <p className="ds-note">There's no automatic email yet. After writing, copy the customer link and send it from your email.</p>
         </Form>
       </s-section>
 

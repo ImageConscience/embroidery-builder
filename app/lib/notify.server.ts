@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { emailConfigured, sendEmail } from "./email.server";
 
 // Staff notifications: an optional Slack incoming webhook per shop, plus alerts shown in the app.
 // Nothing here ever throws: a notification problem must not break a customer's checkout.
@@ -16,6 +17,8 @@ export async function getSettings(shop: string) {
       slackWebhook: null as string | null,
       notifyNew: true,
       notifyReply: true,
+      contactEmail: null as string | null,
+      emailNew: true,
       updatedAt: new Date(),
     }
   );
@@ -70,4 +73,24 @@ export async function raiseAlert(
   }
   const link = a.submissionId ? ` ${slackLink(adminDesignLink(shop, a.submissionId), "Open the design")}` : "";
   await notify(shop, "alert", `:warning: *Imprint Customizer problem:* ${slackEsc(a.message)}${link}`);
+}
+
+// Email the shop's contact address (Lindsey). Returns false when no address or email setup, or on failure
+// (then an alert is raised), so callers can fall back to a mailto link.
+export async function emailStaff(
+  shop: string,
+  m: { subject: string; text: string; html?: string; replyTo?: string; submissionId?: string | null; kind?: "new" | "message" | "test" },
+) {
+  const s = await getSettings(shop);
+  if (!s.contactEmail || !emailConfigured()) return false;
+  if (m.kind === "new" && !s.emailNew) return false;
+  try {
+    await sendEmail({ to: s.contactEmail, subject: m.subject, text: m.text, html: m.html, replyTo: m.replyTo });
+    return true;
+  } catch (e) {
+    console.error(`[email ${shop}] send failed`, e);
+    if (m.kind === "test") throw e;
+    await raiseAlert(shop, { kind: "email_failed", message: `An email to ${s.contactEmail} couldn't be sent: ${m.subject}`, detail: e, submissionId: m.submissionId });
+    return false;
+  }
 }

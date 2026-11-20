@@ -30,7 +30,11 @@
     fillPerSqIn: 1200, satinPerSqIn: 620, runPerIn: 75, perColor: 150, base: 0,
     satinMaxWidthIn: 0.25, uncertainty: 0.3
   };
-  var STEP_NAMES = ["Logo & color", "Location", "Size & position", "Colors", "Price", "Checkout"];
+  var S_LOC = "Apron & location", S_LOGO = "Your logo";
+  var STEP_NAMES = [S_LOC, S_LOGO, "Size & position", "Colors", "Price", "Checkout"];
+  // What the Next button says on each step, so customers know what comes next.
+  var NEXT_LABEL = { "Method": "Next: choose apron & location", "Apron & location": "Next: upload your logo", "Your logo": "Next: size & position",
+    "Size & position": "Next: choose colors", "Colors": "Next: see your price", "Price": "Next: review & check out" };
   var PREVIEW_TYPES = /^image\/(png|jpe?g|svg\+xml|webp|gif)$/i;
   var MAX_FILE = 20 * 1024 * 1024;
   var PROC_MAX = 700;
@@ -50,6 +54,36 @@
     var n = parseInt(m[1], 16);
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
+  // Plain color names customers recognize (thread-card style). Codes only show under "Request specific colors".
+  var COLOR_NAMES = [
+    ["Black", "#111111"], ["Charcoal", "#3B3E42"], ["Dark gray", "#5A5D60"], ["Gray", "#8A8D8F"], ["Silver", "#B5B8BA"], ["Light gray", "#D3D4D5"], ["White", "#FFFFFF"],
+    ["Cream", "#F2E8CF"], ["Ivory", "#F8F3E6"], ["Tan", "#C9A97C"], ["Khaki", "#B5A57A"], ["Light brown", "#A47148"], ["Brown", "#6B4226"], ["Dark brown", "#3E2A1E"],
+    ["Maroon", "#6D1F2A"], ["Burgundy", "#7C1C3A"], ["Dark red", "#9B1B1F"], ["Red", "#D0202E"], ["Bright red", "#EE2737"], ["Coral", "#F2735B"], ["Salmon", "#F29B83"],
+    ["Orange", "#F26B21"], ["Burnt orange", "#C1561E"], ["Light orange", "#F8A24B"], ["Gold", "#F2A900"], ["Old gold", "#B58A2B"], ["Yellow", "#FFD100"], ["Lemon", "#FBE870"],
+    ["Lime green", "#97D700"], ["Kelly green", "#00843D"], ["Green", "#2E8B3E"], ["Forest green", "#1E4D2B"], ["Hunter green", "#2D4A35"], ["Olive", "#6B6B2E"], ["Sage", "#9CAF88"], ["Mint", "#A5DFC4"],
+    ["Teal", "#00797A"], ["Turquoise", "#22B7B0"], ["Aqua", "#5CC9E0"], ["Light blue", "#8DC8E8"], ["Sky blue", "#4FA8DC"], ["Columbia blue", "#9BCBEB"], ["Blue", "#1E5BC6"],
+    ["Royal blue", "#1E3FA0"], ["Navy", "#1B2A4A"], ["Dark navy", "#141B2D"], ["Slate blue", "#5B7F95"], ["Denim", "#3E5F8A"],
+    ["Purple", "#5F259F"], ["Plum", "#6B2C5F"], ["Lavender", "#B9A3D8"], ["Violet", "#7B5CB8"], ["Magenta", "#C8007F"], ["Hot pink", "#E8318A"], ["Pink", "#F29BC1"], ["Light pink", "#F7C6D9"]
+  ];
+  function rgbToLab(c) {
+    var v = c.map(function (x) { x /= 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    var X = (v[0] * 0.4124 + v[1] * 0.3576 + v[2] * 0.1805) / 0.95047, Y = v[0] * 0.2126 + v[1] * 0.7152 + v[2] * 0.0722, Z = (v[0] * 0.0193 + v[1] * 0.1192 + v[2] * 0.9505) / 1.08883;
+    var f = function (t) { return t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116; };
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+  }
+  var NAME_LABS = null;
+  function colorName(hex) {
+    var c = hexToRgb(hex);
+    if (!c) return "";
+    NAME_LABS = NAME_LABS || COLOR_NAMES.map(function (n) { return rgbToLab(hexToRgb(n[1])); });
+    var l = rgbToLab(c), best = 0, bd = Infinity;
+    NAME_LABS.forEach(function (m, i) { var d = Math.pow(l[0] - m[0], 2) + Math.pow(l[1] - m[1], 2) + Math.pow(l[2] - m[2], 2); if (d < bd) { bd = d; best = i; } });
+    return COLOR_NAMES[best][0];
+  }
+  function swatch(hex, label) {
+    return '<span class="emb-sw" style="background:' + esc(hex) + '" aria-hidden="true"></span>' + (label ? esc(label) : "");
+  }
+
   function rgbToHex(c) {
     return "#" + c.map(function (v) { return ("0" + Math.round(v).toString(16)).slice(-2); }).join("").toUpperCase();
   }
@@ -84,11 +118,15 @@
   }
 
   // Remove a plain background by flood-filling from the edges.
-  // Returns null when there is no plain background, else { enclosed: pixels of background color inside the logo }.
+  // keepEnclosed: true = stitch every background-colored area inside the logo, false = remove them all,
+  // "auto" (default) = keep thin ones (letters drawn in the background color) and large ones, and remove
+  // small compact holes (the inside of an "o").
+  // Returns null when there is no plain background, else { enclosed, enclosedKept, bg }.
   function removeBackground(data, w, h, keepEnclosed) {
     var px = data.data, n = w * h, i, transparent = 0;
     for (i = 0; i < n; i++) if (px[i * 4 + 3] < 250) transparent++;
     if (transparent > n * 0.01) return null; // already has transparency
+    var col = function (p) { var o = p * 4; return [px[o], px[o + 1], px[o + 2]]; };
 
     var border = [], x, y;
     for (x = 0; x < w; x++) { border.push(x); border.push((h - 1) * w + x); }
@@ -98,46 +136,101 @@
       var v = border.map(function (p) { return px[p * 4 + ch]; }).sort(function (a, b) { return a - b; });
       return v[v.length >> 1];
     }
-    var avg = [med(0), med(1), med(2)], TH = 45 * 45;
-    var bgEdge = border.filter(function (p) { return d2([px[p * 4], px[p * 4 + 1], px[p * 4 + 2]], avg) <= TH; });
-    if (bgEdge.length < border.length * 0.8) return null; // edges are not one plain color
+    var avg = [med(0), med(1), med(2)];
+    var near = border.map(function (p) { return Math.sqrt(d2(col(p), avg)); }).filter(function (d) { return d <= 60; });
+    if (near.length < border.length * 0.7) return null; // edges are not one plain color
+    // Tolerance follows the background's own noise (JPEG speckle, slight gradients).
+    var mean = near.reduce(function (a, b) { return a + b; }, 0) / near.length;
+    var sd = Math.sqrt(near.reduce(function (a, b) { return a + (b - mean) * (b - mean); }, 0) / near.length);
+    var T = clamp(mean + 3 * sd, 36, 50), TH = T * T;
+    var bgEdge = border.filter(function (p) { return d2(col(p), avg) <= TH; });
 
     var seen = new Uint8Array(n), stack = bgEdge;
     while (stack.length) {
       var p = stack.pop();
       if (seen[p]) continue;
       seen[p] = 1;
-      var o = p * 4;
-      if (d2([px[o], px[o + 1], px[o + 2]], avg) > TH) continue;
-      px[o + 3] = 0;
+      if (d2(col(p), avg) > TH) continue;
+      px[p * 4 + 3] = 0;
       var px_ = p % w, py_ = (p / w) | 0;
       if (px_ > 0) stack.push(p - 1);
       if (px_ < w - 1) stack.push(p + 1);
       if (py_ > 0) stack.push(p - w);
       if (py_ < h - 1) stack.push(p + w);
     }
-    // Background-colored areas enclosed by the logo (inside letters, rings). Removed unless kept.
-    var enclosed = 0;
-    for (i = 0; i < n; i++) {
-      var q = i * 4;
-      if (px[q + 3] && d2([px[q], px[q + 1], px[q + 2]], avg) <= TH) { enclosed++; if (!keepEnclosed) px[q + 3] = 0; }
-    }
-    // Soft edges: fade pixels next to the removed background by how close they are to it.
-    var MATTE = 120, fade = [];
-    for (i = 0; i < n; i++) {
-      var a = i * 4; if (!px[a + 3]) continue;
-      var xx = i % w, yy = (i / w) | 0, nearBg = false;
-      for (var dy = -1; dy <= 1 && !nearBg; dy++) for (var dx = -1; dx <= 1; dx++) {
-        var nx = xx + dx, ny = yy + dy;
-        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-        if (!px[(ny * w + nx) * 4 + 3]) { nearBg = true; break; }
+
+    // Background-colored areas enclosed by the logo, as separate regions.
+    var encMask = new Uint8Array(n), enclosed = 0, enclosedKept = 0;
+    for (i = 0; i < n; i++) if (px[i * 4 + 3] && d2(col(i), avg) <= TH) { encMask[i] = 1; enclosed++; }
+    var whiteBg = avg[0] > 225 && avg[1] > 225 && avg[2] > 225;
+    if (enclosed) {
+      var mode = keepEnclosed === true || keepEnclosed === false ? keepEnclosed : "auto";
+      var dist = mode === "auto" ? distanceTransform(encMask, w, h) : null;
+      var comp = new Int32Array(n).fill(-1), comps = [];
+      for (i = 0; i < n; i++) {
+        if (!encMask[i] || comp[i] >= 0) continue;
+        var id = comps.length, list = [], st = [i], maxD = 0;
+        comp[i] = id;
+        while (st.length) {
+          var q = st.pop(); list.push(q);
+          if (dist && dist[q] > maxD) maxD = dist[q];
+          var qx = q % w, qy = (q / w) | 0;
+          [qx > 0 ? q - 1 : -1, qx < w - 1 ? q + 1 : -1, qy > 0 ? q - w : -1, qy < h - 1 ? q + w : -1].forEach(function (r) {
+            if (r >= 0 && encMask[r] && comp[r] < 0) { comp[r] = id; st.push(r); }
+          });
+        }
+        // Auto: thin, stroke-like regions (letters, lines) and large areas (a badge's fill) are part of the
+        // design; small compact blobs (the inside of an "o" or "A") are holes. Specks are left alone.
+        var thin = list.length / Math.max(1, maxD * maxD) > 9;
+        // On a colored background, background-colored areas inside the logo are holes unless large.
+        var keep = mode === "auto" ? (whiteBg && thin) || list.length > n * 0.02 || list.length < 12 : mode;
+        if (keep) enclosedKept += list.length;
+        else list.forEach(function (q2) { px[q2 * 4 + 3] = 0; });
+        comps.push(keep);
       }
-      if (!nearBg) continue;
-      var dd = Math.sqrt(d2([px[a], px[a + 1], px[a + 2]], avg));
-      if (dd < MATTE) fade.push([a, Math.round(255 * dd / MATTE)]);
     }
-    fade.forEach(function (f) { px[f[0] + 3] = Math.min(px[f[0] + 3], f[1]); });
-    return { enclosed: enclosed, bg: avg };
+
+    // Clean edges: a pixel next to the removed background that is a blend of the background and the
+    // logo color just inside it gets that logo color, with partial transparency. No colored halo.
+    var alpha0 = new Uint8Array(n);
+    for (i = 0; i < n; i++) alpha0[i] = px[i * 4 + 3] ? 1 : 0;
+    function touchesBg(q) {
+      var qx = q % w, qy = (q / w) | 0;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+        var nx = qx + dx, ny = qy + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        if (!alpha0[ny * w + nx]) return true;
+      }
+      return false;
+    }
+    var bgv = avg, fixes = [];
+    for (i = 0; i < n; i++) {
+      if (!alpha0[i] || !touchesBg(i)) continue;
+      var c = col(i), ix = i % w, iy = (i / w) | 0, inner = null, bestD = -1;
+      // the most logo-like color within 3 px that isn't itself on the edge
+      for (var ry = -3; ry <= 3; ry++) for (var rx = -3; rx <= 3; rx++) {
+        var nx2 = ix + rx, ny2 = iy + ry;
+        if (nx2 < 0 || ny2 < 0 || nx2 >= w || ny2 >= h) continue;
+        var j = ny2 * w + nx2;
+        if (!alpha0[j] || touchesBg(j)) continue;
+        var dj = d2(col(j), bgv);
+        if (dj > bestD) { bestD = dj; inner = col(j); }
+      }
+      var dBg = Math.sqrt(d2(c, bgv));
+      if (!inner) { if (dBg < 90) fixes.push([i, Math.round(255 * dBg / 90), null]); continue; }
+      // where c sits on the line from the background to the inner color (0 = background, 1 = logo)
+      var v = [inner[0] - bgv[0], inner[1] - bgv[1], inner[2] - bgv[2]], vv = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+      if (vv < 400) continue;
+      var t = ((c[0] - bgv[0]) * v[0] + (c[1] - bgv[1]) * v[1] + (c[2] - bgv[2]) * v[2]) / vv;
+      var off = Math.sqrt(d2(c, [bgv[0] + v[0] * t, bgv[1] + v[1] * t, bgv[2] + v[2] * t]));
+      if (t < 0.95 && off < 40) fixes.push([i, Math.round(255 * clamp(t, 0, 1)), inner]);
+    }
+    fixes.forEach(function (f) {
+      var o = f[0] * 4;
+      if (f[2]) { px[o] = f[2][0]; px[o + 1] = f[2][1]; px[o + 2] = f[2][2]; }
+      px[o + 3] = Math.min(px[o + 3], f[1]);
+    });
+    return { enclosed: enclosed, enclosedKept: enclosedKept, bg: avg };
   }
 
   // Reduce the logo to a handful of flat colors (k-means, then merge near-duplicates).
@@ -255,7 +348,7 @@
         var thumbKept = cv.toDataURL("image/png");
         // Find a plain background on a copy, so the customer can choose to remove it or keep it.
         var probe = new ImageData(new Uint8ClampedArray(data.data), w, h);
-        var keepIn = opts.keepEnclosed !== false; // inner areas (letters, rings) stay stitched unless the customer unticks it
+        var keepIn = opts.keepEnclosed === true || opts.keepEnclosed === false ? opts.keepEnclosed : "auto"; // see removeBackground
         var bgInfo = removeBackground(probe, w, h, keepIn);
         var thumbRemoved = null;
         if (bgInfo) { cx.putImageData(probe, 0, 0); thumbRemoved = cv.toDataURL("image/png"); }
@@ -288,7 +381,7 @@
         resolve({
           file: file, w: tw, h: th, labels: labels, alpha: alpha, mask: mask, dist: dist, edges: edges,
           opaque: q.opaque, palette: q.palette, bgDetected: !!bgInfo, bgRemoved: !!bgInfo && !keepBg, bgKept: keepBg,
-          bg: bgInfo && bgInfo.bg, enclosed: bgInfo && !keepBg ? bgInfo.enclosed : 0, keepEnclosed: keepIn,
+          bg: bgInfo && bgInfo.bg, enclosed: bgInfo && !keepBg ? bgInfo.enclosed : 0, enclosedKept: bgInfo && !keepBg ? bgInfo.enclosedKept : 0, keepEnclosed: keepIn,
           thumb: thumb, thumbKept: thumbKept, thumbRemoved: thumbRemoved,
           naturalW: nw, naturalH: nh, lowRes: !/svg/i.test(file.type) && Math.max(nw, nh) < 500
         });
@@ -403,7 +496,6 @@
     this.place = {};
     this.qty = Math.max(this.pricing.minimum || 1, 72);
     this.contact = { name: "", email: "", phone: "", company: "", notes: "" };
-    this.rights = false;
     this.colorMode = "original"; // original | white | black | custom
     this.colorComment = "";
     this.error = "";
@@ -465,6 +557,7 @@
         j = j || {};
         if (j.estimator) { self.est = merge(DEFAULT_EST, j.estimator); self.estKey = null; }
         self.methods = Array.isArray(j.methods) ? j.methods : [];
+        self.volume = Array.isArray(j.volume) ? j.volume : [];
         if (!self.templates.length) {
           var std = self.methods.filter(function (m) { return m.key === DEFAULT_PRICING.key; })[0];
           if (std) self.pricing = merge(DEFAULT_PRICING, std);
@@ -510,7 +603,7 @@
   Builder.prototype.isEmbroidery = function () { return this.pricing.kind !== "screen_print"; };
   Builder.prototype.showMethodStep = function () { return this.templates.length > 0 && this.availableMethods().length !== 1; };
   Builder.prototype.steps = function () {
-    var names = STEP_NAMES.slice(), fns = [this.stepLogo, this.stepLocation, this.stepPlace, this.stepColors, this.stepPrice, this.stepSubmit];
+    var names = STEP_NAMES.slice(), fns = [this.stepLocation, this.stepLogo, this.stepPlace, this.stepColors, this.stepPrice, this.stepSubmit];
     if (this.showMethodStep()) { names.unshift("Method"); fns.unshift(this.stepMethod); }
     return names.map(function (n, i) { return { name: n, fn: fns[i] }; });
   };
@@ -540,8 +633,8 @@
     if (!s) return false;
     if (s.name === "Method") return true;
     if (!this.methodKey) return false;
-    if (s.name === "Logo & color") return true;
-    if (s.name === "Location") return !!this.logo;
+    if (s.name === S_LOC) return true;
+    if (s.name === S_LOGO) return !!this.zoneChosen;
     return !!this.logo && this.zoneChosen;
   };
 
@@ -617,7 +710,7 @@
     else { cx.fillStyle = "#3A4049"; cx.fillRect(0, 0, W, H); }
 
     var self = this, zoomed = k > 1;
-    var showLogo = this.zoneChosen && (exporting || stepNow !== "Logo & color");
+    var showLogo = !!this.zoneChosen;
     if (!exporting) {
       this.zones.forEach(function (z) {
         var r = self.zoneRect(z, W, H), active = self.zoneChosen && z === self.zone;
@@ -628,7 +721,7 @@
         cx.lineWidth = (active ? 2.5 : 1.5) / k;
         cx.strokeStyle = active ? "#E07A5F" : "rgba(255,255,255,0.55)";
         if (active && !showLogo) { cx.fillStyle = "rgba(224,122,95,0.18)"; cx.fillRect(r.x, r.y, r.w, r.h); }
-        if (stepNow === "Location") self.drawZoneLabel(cx, z, r, active);
+        if (stepNow === S_LOC) self.drawZoneLabel(cx, z, r, active);
         cx.strokeRect(r.x, r.y, r.w, r.h);
         cx.restore();
       });
@@ -674,6 +767,7 @@
   Builder.prototype.chooseZone = function (z) {
     this.zone = z;
     this.zoneChosen = true;
+    if (z.qtyStep > 1) this.qty = this.fixQty(Math.max(this.qty, this.minimum()));
     this.estKey = null;
     this.render();
   };
@@ -687,7 +781,7 @@
     }
     cv.addEventListener("pointerdown", function (e) {
       var stepNow = self.stepName();
-      if (stepNow === "Location") {
+      if (stepNow === S_LOC) {
         var lp = pos(e), L = self.layout();
         var hit = self.zones.filter(function (z) { var r = self.zoneRect(z, L.cssW, L.cssH); return lp.x >= r.x && lp.x <= r.x + r.w && lp.y >= r.y && lp.y <= r.y + r.h; })[0];
         if (hit) self.chooseZone(hit);
@@ -712,7 +806,7 @@
         if (sn === "Size & position" && self.logoBox) {
           var b = self.logoBox, t = 10 / ((self.view && self.view.k) || 1);
           cv.style.cursor = (p.x >= b.x - t && p.x <= b.x + b.w + t && p.y >= b.y - t && p.y <= b.y + b.h + t) ? "move" : "default";
-        } else if (sn === "Location") {
+        } else if (sn === S_LOC) {
           var L2 = self.layout();
           cv.style.cursor = self.zones.some(function (z) { var r = self.zoneRect(z, L2.cssW, L2.cssH); return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }) ? "pointer" : "default";
         } else cv.style.cursor = "default";
@@ -783,7 +877,7 @@
     var cur = steps[this.step].name;
     steps.forEach(function (st, i) {
       var name = st.name;
-      var b = el("button", { type: "button", class: "emb-step" }, (i + 1) + ". " + esc(name));
+      var b = el("button", { type: "button", class: "emb-step" + (i < self.step && self.canGo(i) ? " is-done" : "") }, '<span class="emb-num">' + (i < self.step ? "✓" : (i + 1)) + "</span>" + esc(name));
       if (i === self.step) b.setAttribute("aria-current", "step");
       if (!self.canGo(i)) b.disabled = true;
       b.addEventListener("click", function () { self.go(i); });
@@ -798,7 +892,7 @@
     back.style.visibility = this.step === 0 ? "hidden" : "visible";
     next.style.visibility = this.step >= steps.length - 1 ? "hidden" : "visible";
     next.disabled = !this.canGo(this.step + 1);
-    next.textContent = cur === "Method" && !this.methodKey ? "Choose a method to continue" : cur === "Logo & color" && !this.logo ? "Upload a logo to continue" : cur === "Location" && !this.zoneChosen ? "Choose a location to continue" : "Next";
+    next.textContent = cur === "Method" && !this.methodKey ? "Choose a method to continue" : cur === S_LOGO && !this.logo ? "Upload a logo to continue" : cur === S_LOC && !this.zoneChosen ? "Choose a location to continue" : (NEXT_LABEL[cur] || "Next");
     next.className = this.canGo(this.step + 1) ? "emb-primary" : "emb-btn";
     next.style.width = "auto";
 
@@ -837,15 +931,15 @@
     p.appendChild(el("p", { class: "emb-help" }, "You can switch later without uploading your logo again."));
   };
 
-  // Apron color (on the Logo & color step).
-  Builder.prototype.colorPicker = function (p) {
+  // Apron color (first step; offered again once the logo is on).
+  Builder.prototype.colorPicker = function (p, label) {
     var self = this, vs = this.cfg.variants || [];
     if (vs.length < 2) return;
     var distinct = {};
     vs.forEach(function (v) { distinct[v.image] = 1; });
     if (Object.keys(distinct).length < vs.length) {
       // Colors share one embroidery photo: choose by name.
-      p.appendChild(el("p", { class: "emb-label" }, "Apron color"));
+      p.appendChild(el("p", { class: "emb-label" }, esc(label || "Apron color")));
       var vc = el("div", { class: "emb-chips" });
       vs.forEach(function (v) {
         var b = el("button", { type: "button", class: "emb-chip", "aria-pressed": String(v === self.variant) }, esc(v.title));
@@ -855,7 +949,7 @@
       });
       p.appendChild(vc);
     } else {
-      p.appendChild(el("p", { class: "emb-label" }, "Apron color: " + esc(this.variant ? this.variant.title : "")));
+      p.appendChild(el("p", { class: "emb-label" }, esc(label || "Apron color") + ": " + esc(this.variant ? this.variant.title : "")));
       var sw = el("div", { class: "emb-swatches" }), seen = {};
       vs.forEach(function (v) {
         if (seen[v.image]) return; seen[v.image] = 1;
@@ -891,12 +985,14 @@
 
   Builder.prototype.stepLocation = function (p) {
     var self = this;
-    p.appendChild(el("h3", null, "Where should your logo go?"));
+    p.appendChild(el("h3", null, "Choose your apron color and logo location"));
+    this.colorPicker(p);
+    p.appendChild(el("p", { class: "emb-label" }, "Logo location"));
     if (!this.zones.length) {
       p.appendChild(el("p", { class: "emb-warn" }, "No locations are set up for this apron yet."));
       return;
     }
-    p.appendChild(el("p", { class: "emb-help" }, "Tap a spot on the apron, or choose one here. You'll size and position it next."));
+    p.appendChild(el("p", { class: "emb-help" }, "Tap a spot on the apron, or choose one here. You'll upload your logo next, then size and position it."));
     var chips = el("div", { class: "emb-chips" });
     this.zones.forEach(function (z) {
       var b = el("button", { type: "button", class: "emb-chip", "aria-pressed": String(self.zoneChosen && z === self.zone) }, esc(z.label));
@@ -904,13 +1000,17 @@
       chips.appendChild(b);
     });
     p.appendChild(chips);
-    if (this.zoneChosen) p.appendChild(el("p", { class: "emb-help" }, this.zoneLimits(this.zone)));
+    if (this.zoneChosen) {
+      p.appendChild(el("p", { class: "emb-help" }, this.zoneLimits(this.zone)));
+      if (this.zone.qtyStep > 1) p.appendChild(el("p", { class: "emb-note" }, "<strong>" + esc(this.zone.label) + " is sold in multiples of " + this.zone.qtyStep + ".</strong> Your quantity will be " + this.zone.qtyStep + ", " + (this.zone.qtyStep * 2) + ", " + (this.zone.qtyStep * 3) + " and so on."));
+    }
     this.methodLink(p);
   };
 
   Builder.prototype.stepLogo = function (p) {
     var self = this;
     p.appendChild(el("h3", null, "Upload your logo"));
+    if (!this.logo) p.appendChild(el("p", { class: "emb-help" }, "It appears on the " + esc(this.zone ? this.zone.label.toLowerCase() : "apron") + " as soon as it's uploaded."));
     var drop = el("label", { class: "emb-drop" },
       '<strong>Drop your logo here, or browse</strong><span class="emb-help">PNG, JPG or SVG for the preview · up to 20 MB</span>' +
       '<input type="file" class="emb-sr" accept=".png,.jpg,.jpeg,.svg,.webp,.pdf,.ai,.eps,image/*,application/pdf">');
@@ -930,24 +1030,36 @@
       p.appendChild(el("div", { class: "emb-file" },
         '<img alt="" src="' + L.thumb + '"><div><p><strong>' + esc(L.file.name) + '</strong></p>' +
         '<p class="emb-help">' + L.naturalW + " × " + L.naturalH + " px · " + L.palette.length + " color" + (L.palette.length === 1 ? "" : "s") + " detected</p>" + badges + "</div>"));
-      if (L.bgRemoved && (L.enclosed > L.opaque * 0.005 || L.keepEnclosed)) {
-        var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : rgbToHex(L.bg);
-        var keep = el("label", { class: "emb-check" }, '<input type="checkbox"' + (L.keepEnclosed ? " checked" : "") + '><span>Stitch the ' + esc(bgName) +
-          " areas inside my logo (like letters). Untick this if those areas should show the apron fabric, like the hole in a ring.</span>");
-        keep.querySelector("input").addEventListener("change", function (e) { self.handleFile(L.file, { keepEnclosed: e.target.checked, keepBackground: L.bgKept, keepPlace: true }); });
-        p.appendChild(keep);
+      if (L.bgRemoved && L.enclosed > L.opaque * 0.005) {
+        var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : colorName(rgbToHex(L.bg)).toLowerCase();
+        var inside = el("fieldset", { class: "emb-inside" }, "<legend class='emb-label'>The " + esc(bgName) + " areas inside your logo</legend>");
+        [
+          { v: "auto", t: "Decide for me (recommended)", d: "Letters and lines in that color are stitched; holes like the middle of an \"o\" show the apron." },
+          { v: true, t: "Stitch them all", d: "Every " + bgName + " area inside the logo is stitched." },
+          { v: false, t: "Show the apron through all of them", d: "Like the hole in a ring." }
+        ].forEach(function (o) {
+          var on = L.keepEnclosed === o.v;
+          var lab = el("label", { class: "emb-check" }, '<input type="radio" name="emb-inside"' + (on ? " checked" : "") + "><span><strong>" + esc(o.t) + "</strong> " + esc(o.d) + "</span>");
+          lab.querySelector("input").addEventListener("change", function () { self.handleFile(L.file, { keepEnclosed: o.v, keepBackground: L.bgKept, keepPlace: true }); });
+          inside.appendChild(lab);
+        });
+        p.appendChild(inside);
       }
       if (L.lowRes) p.appendChild(el("p", { class: "emb-warn" }, "This file is small, so fine details may be hard to judge. A larger file or a vector (SVG, AI, EPS, PDF) works best."));
     }
     p.appendChild(el("p", { class: "emb-help" }, "We keep your original file exactly as uploaded for production."));
-    this.colorPicker(p);
+    if (this.logo) this.colorPicker(p, "Doesn't stand out? Try another apron color");
+    var lc = el("p", { class: "emb-help" }, "Location: <strong>" + esc(this.zone ? this.zone.label : "") + "</strong> ");
+    var lcb = el("button", { type: "button", class: "emb-link" }, "change");
+    lcb.addEventListener("click", function () { self.go(self.stepIndex(S_LOC)); });
+    lc.appendChild(lcb); p.appendChild(lc);
     this.methodLink(p);
   };
 
   // Remove the plain background (default) or keep it as part of the design.
   Builder.prototype.backgroundChoice = function (p) {
     var self = this, L = this.logo;
-    var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : rgbToHex(L.bg);
+    var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : colorName(rgbToHex(L.bg)).toLowerCase();
     var box = el("fieldset", { class: "emb-bgchoice" }, "<legend class='emb-label'>Your logo has a plain " + esc(bgName) + " background. Remove it or keep it?</legend>");
     [
       { keep: false, title: "Remove the background", text: "Only the logo is stitched. The apron shows around it.", img: L.thumbRemoved },
@@ -1006,7 +1118,7 @@
     p.appendChild(el("h3", null, "Size and position"));
     var loc = el("p", { class: "emb-help" }, "Location: <strong>" + esc(this.zone.label) + "</strong> ");
     var ch = el("button", { type: "button", class: "emb-link" }, "change");
-    ch.addEventListener("click", function () { self.go(self.stepIndex("Location")); });
+    ch.addEventListener("click", function () { self.go(self.stepIndex(S_LOC)); });
     loc.appendChild(ch);
     p.appendChild(loc);
     p.appendChild(el("p", { class: "emb-help" }, "We zoomed in on this location. Drag the logo to move it. Drag a corner or use the slider to set the width. It always stays inside the dashed area."));
@@ -1032,7 +1144,7 @@
     { id: "original", title: "Keep my logo's colors", text: { thread: "We'll use the closest thread to each color in your logo.", ink: "We'll use the closest ink to each color in your logo." } },
     { id: "white", title: "All white", text: { thread: "The whole logo in white thread.", ink: "The whole logo in white ink." }, hex: "#FFFFFF" },
     { id: "black", title: "All black", text: { thread: "The whole logo in black thread.", ink: "The whole logo in black ink." }, hex: "#111111" },
-    { id: "custom", title: "Request specific colors", text: { thread: "Give us HEX or Pantone (PMS) codes for your brand colors.", ink: "Give us HEX or Pantone (PMS) codes for your brand colors." } }
+    { id: "custom", title: "Request specific colors (advanced)", text: { thread: "Give us HEX or Pantone (PMS) codes for your brand colors.", ink: "Give us HEX or Pantone (PMS) codes for your brand colors." } }
   ];
 
   // Re-color the preview for the chosen color option.
@@ -1068,18 +1180,25 @@
     });
     p.appendChild(box);
 
+    if (this.colorMode === "original" || this.colorMode === "white" || this.colorMode === "black") {
+      p.appendChild(el("p", { class: "emb-label" }, "Your " + word + " colors"));
+      p.appendChild(el("ul", { class: "emb-colorlist" }, this.namedColors().map(function (c) {
+        return "<li>" + swatch(c.hex) + "<span>" + esc(c.name) + "</span>" + (c.share != null ? "<span class='emb-help'>" + c.share + "% of the logo</span>" : "") + "</li>";
+      }).join("")));
+    }
+
     if (this.colorMode === "custom") {
       var adv = el("div", { class: "emb-advanced" });
       adv.appendChild(el("p", { class: "emb-help" }, "Edit the HEX code or add a Pantone (PMS) code for each color. We'll match them as closely as " + word + " allows and show you on your proof before anything is made."));
       L.palette.forEach(function (c, i) {
         var row = el("div", { class: "emb-color-row" });
-        var dot = el("span", { class: "emb-dot", "aria-hidden": "true" }); dot.style.background = c.hex;
+        var dot = el("span", { class: "emb-dot", "aria-hidden": "true", title: colorName(c.hex) }); dot.style.background = c.hex;
         var hex = el("input", { class: "emb-input", value: c.hex, "aria-label": "Color " + (i + 1) + " HEX", maxlength: "7", spellcheck: "false" });
         var pms = el("input", { class: "emb-input", value: c.pantone, placeholder: "Pantone, like 186 C (optional)", "aria-label": "Color " + (i + 1) + " Pantone", maxlength: "24" });
         hex.addEventListener("input", function () {
           var v = hex.value.trim(); if (v && v[0] !== "#") v = "#" + v;
           var ok = !!hexToRgb(v); hex.setAttribute("aria-invalid", String(!ok));
-          if (ok) { c.hex = v.toUpperCase(); dot.style.background = c.hex; self.logoCanvas = renderLogo(L); self.draw(); self.refreshColorLine(); }
+          if (ok) { c.hex = v.toUpperCase(); dot.style.background = c.hex; dot.title = colorName(c.hex); self.logoCanvas = renderLogo(L); self.draw(); self.refreshColorLine(); }
         });
         pms.addEventListener("input", function () { c.pantone = pms.value.trim(); self.refreshColorLine(); });
         row.appendChild(dot); row.appendChild(hex); row.appendChild(pms);
@@ -1099,6 +1218,24 @@
     this.refreshColorLine();
     p.appendChild(el("p", { class: "emb-help" }, (this.pricing.colorNote ? esc(this.pricing.colorNote) + " " : "") +
       "Our team picks the " + word + " and shows it on your proof for approval. Screens show color differently, so exact matches can't be guaranteed."));
+  };
+
+  // The design's colors with plain names (no codes), for the Colors and checkout steps.
+  Builder.prototype.namedColors = function () {
+    var L = this.logo;
+    if (!L) return [];
+    if (this.colorMode === "white") return [{ hex: "#FFFFFF", name: "White", share: null }];
+    if (this.colorMode === "black") return [{ hex: "#111111", name: "Black", share: null }];
+    var seen = {}, out = [];
+    L.palette.slice().sort(function (a, b) { return b.count - a.count; }).forEach(function (c) {
+      var hex = String(c.hex).toUpperCase();
+      if (seen[hex]) { seen[hex].share += Math.round(c.count / L.opaque * 100); return; }
+      var nm = colorName(hex), n = out.filter(function (o) { return o.base === nm; }).length;
+      var item = { hex: hex, base: nm, name: n ? nm + " (shade " + (n + 1) + ")" : nm, share: Math.max(1, Math.round(c.count / L.opaque * 100)), pantone: c.pantone };
+      seen[hex] = item; out.push(item);
+    });
+    if (this.colorMode === "custom") out.forEach(function (o) { if (o.pantone) o.name += " · " + o.pantone.toUpperCase(); });
+    return out;
   };
 
   Builder.prototype.refreshColorLine = function () {
@@ -1168,8 +1305,8 @@
   Builder.prototype.colorsLabel = function () {
     if (this.colorMode === "white") return "All white";
     if (this.colorMode === "black") return "All black";
-    var list = this.logo.palette.map(function (c) { return this.colorMode === "custom" && c.pantone ? c.pantone : c.hex; }, this).join(", ");
-    return (this.colorMode === "original" ? "Logo colors, closest match: " : "Requested: ") + list;
+    var list = this.namedColors().map(function (c) { return c.name; }).join(", ");
+    return (this.colorMode === "original" ? "Logo colors (closest " + (this.isEmbroidery() ? "thread" : "ink") + "): " : "Requested: ") + list;
   };
 
   Builder.prototype.apronPrice = function () {
@@ -1177,11 +1314,36 @@
     return v && typeof v.price === "number" ? v.price / 100 : null;
   };
 
+  // Apron volume discount: the store's tier list for this product (by collection or vendor), from the app.
+  Builder.prototype.volumeGroup = function () {
+    var p = this.cfg.product || {}, vendor = String(p.vendor || "").toLowerCase(), cols = (p.collections || []).map(function (h) { return String(h).toLowerCase(); });
+    return (this.volume || []).filter(function (g) {
+      return (g.type === "collection" && cols.indexOf(String(g.match).toLowerCase()) >= 0) || (g.type === "vendor" && vendor && vendor === String(g.match).toLowerCase()) || g.type === "all";
+    })[0] || null;
+  };
+  Builder.prototype.volumeDiscount = function (qty) {
+    var g = this.volumeGroup(), out = { percent: 0, min: 0, next: null };
+    if (!g) return out;
+    g.tiers.forEach(function (t) { if (qty >= t.min) { out.percent = t.percent; out.min = t.min; } else if (!out.next) out.next = t; });
+    return out;
+  };
+
   Builder.prototype.quote = function () {
     var e = this.currentEstimate(), pr = price(this.pricing, this.qty, e ? e.stitches : 0, this.colorCount(), this.customColorCount());
     var ap = this.apronPrice();
     var aprons = ap == null ? null : ap * this.qty;
-    return { estimate: e, price: pr, aprons: aprons, grand: (aprons || 0) + pr.total };
+    var vd = this.volumeDiscount(this.qty);
+    var off = aprons == null ? 0 : Math.round(aprons * vd.percent) / 100;
+    return { estimate: e, price: pr, aprons: aprons, volume: vd, volumeOff: off, grand: (aprons || 0) - off + pr.total };
+  };
+
+  // Quantity steps: some locations are sold only in multiples (e.g. DayStar pockets in 40s).
+  Builder.prototype.qtyStep = function () { return (this.zone && this.zone.qtyStep > 1) ? this.zone.qtyStep : 1; };
+  Builder.prototype.fixQty = function (n) {
+    var step = this.qtyStep(), min = this.minimum();
+    n = Math.max(1, n || 1);
+    if (step > 1) { n = Math.ceil(n / step) * step; min = Math.ceil(min / step) * step; }
+    return n;
   };
 
   Builder.prototype.stepPrice = function (p) {
@@ -1194,14 +1356,26 @@
       p.appendChild(el("div", { class: "emb-meter" + (e.stitches > inc ? " is-over" : "") }, '<span style="width:' + pct.toFixed(1) + '%"></span>'));
     }
     p.appendChild(el("p", { class: "emb-help", "data-est-line": "" }, this.estimateSummary(e)));
-    p.appendChild(el("p", { class: "emb-label" }, "Quantity"));
-    var qty = el("input", { type: "number", class: "emb-input", min: "1", step: String(this.zone.qtyStep || 1), value: String(this.qty), "aria-label": "Quantity", inputmode: "numeric" });
-    qty.addEventListener("change", function () { self.qty = Math.max(1, parseInt(qty.value, 10) || 1); self.render(); });
-    p.appendChild(qty);
+    var step = this.qtyStep(), minQ = this.minimum();
+    p.appendChild(el("p", { class: "emb-label" }, "Quantity" + (step > 1 ? " (in multiples of " + step + ")" : "")));
+    var qrow = el("div", { class: "emb-qty" });
+    var minus = el("button", { type: "button", class: "emb-btn emb-qbtn", "aria-label": "Fewer" }, "−");
+    var qty = el("input", { type: "number", class: "emb-input", min: String(step > 1 ? Math.max(step, minQ) : 1), step: String(step), value: String(this.qty), "aria-label": "Quantity", inputmode: "numeric" });
+    var plus = el("button", { type: "button", class: "emb-btn emb-qbtn", "aria-label": "More" }, "+");
+    var setQ = function (n) { self.qty = step > 1 ? self.fixQty(n) : Math.max(1, n || 1); self.render(); };
+    minus.addEventListener("click", function () { setQ(self.qty - step); });
+    plus.addEventListener("click", function () { setQ(self.qty + step); });
+    qty.addEventListener("change", function () { setQ(parseInt(qty.value, 10)); });
+    qrow.appendChild(minus); qrow.appendChild(qty); qrow.appendChild(plus);
+    p.appendChild(qrow);
+    var rules = [minQ + " minimum"];
+    if (step > 1) { var st0 = Math.ceil(Math.max(minQ, step) / step) * step; rules.push("ordered in multiples of " + step + " (" + st0 + ", " + (st0 + step) + ", " + (st0 + 2 * step) + "…)"); }
+    p.appendChild(el("p", { class: "emb-help" }, esc(this.zone.label) + ": " + rules.join(", ") + "."));
     this.problemsBox(p, ["qty", "stitches"]);
     var rows = [];
     var label = m.kind === "screen_print" ? "Screen printing" : "Embroidery";
     if (q.aprons != null) rows.push([this.qty + " aprons × " + money(this.apronPrice()), money(q.aprons)]);
+    if (q.volumeOff > 0) rows.push(["Volume discount on aprons (" + q.volume.min + "+, " + q.volume.percent + "% off)", "−" + money(q.volumeOff)]);
     rows.push([label + " " + this.qty + " × " + money(pr.tier.price), money(pr.embroidery)]);
     if (m.kind !== "screen_print") rows.push(["Extra stitches" + (pr.extraK ? " (" + pr.extraK + "k × " + money(m.perThousandStitches) + ")" : ""), money(pr.stitchCharge)]);
     rows.push(["Extra colors" + (pr.extraColors ? " (" + pr.extraColors + ")" : ""), money(pr.colorCharge)]);
@@ -1209,6 +1383,7 @@
     rows.push(["Setup, one time", money(pr.setup)]);
     p.appendChild(el("table", { class: "emb-table" }, "<tbody>" + rows.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td></tr>"; }).join("") + "</tbody>"));
     p.appendChild(el("div", { class: "emb-total" }, "<span>Total before tax and shipping</span><span>" + money(q.grand) + "</span>"));
+    if (q.volume.next && q.aprons != null) p.appendChild(el("p", { class: "emb-help emb-nexttier" }, "Order " + q.volume.next.min + " or more and save " + q.volume.next.percent + "% on the aprons."));
     p.appendChild(el("p", { class: "emb-help" }, "You'll pay this at checkout. " + esc(m.name) + " is " + money(pr.perApron) + " per apron plus the one-time setup fee. You'll get a digital proof to approve before production" + (m.leadTime ? "; production takes " + esc(m.leadTime) : "") + "."));
   };
 
@@ -1221,16 +1396,18 @@
     }
     var q = this.quote(), pl = this.getPlace();
     p.appendChild(el("h3", null, "Review and check out"));
-    var colors = this.colorsLabel();
+    var colorsHtml = this.namedColors().map(function (c) { return '<span class="emb-swname">' + swatch(c.hex, c.name) + "</span>"; }).join(" ");
     var spec = [
       ["Apron", (this.cfg.product ? this.cfg.product.title : "") + (this.variant ? " · " + this.variant.title : "")],
       ["Method", this.pricing.name],
-      ["Location", this.zone.label], ["Size", pl.w.toFixed(1) + "″ × " + pl.h.toFixed(1) + "″"],
-      ["Colors", colors]
+      ["Location", this.zone.label], ["Size", pl.w.toFixed(1) + "″ wide (about " + pl.h.toFixed(1) + "″ tall)"],
+      ["Colors", { html: colorsHtml || esc(this.colorsLabel()) }]
     ];
     if (q.estimate) spec.push(["Est. stitches", "≈ " + fmtInt(round100(q.estimate.stitches))]);
-    spec.push(["Quantity", String(this.qty)], [this.pricing.name + " + setup", money(q.price.total)], ["Total before tax and shipping", money(q.grand)]);
-    p.appendChild(el("table", { class: "emb-spec" }, "<tbody>" + spec.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") + "</tbody>"));
+    spec.push(["Quantity", String(this.qty)]);
+    if (q.aprons != null) spec.push(["Aprons", money(q.aprons) + (q.volumeOff > 0 ? " − " + money(q.volumeOff) + " volume discount (" + q.volume.percent + "%)" : "")]);
+    spec.push([this.pricing.name + " + setup", money(q.price.total)], ["Total before tax and shipping", money(q.grand)]);
+    p.appendChild(el("table", { class: "emb-spec" }, "<tbody>" + spec.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + (r[1] && r[1].html != null ? r[1].html : esc(r[1])) + "</td></tr>"; }).join("") + "</tbody>"));
     var emailLab = el("label", { class: "emb-label" }, "Email (optional)");
     var emailIn = el("input", { class: "emb-input", type: "email", value: this.contact.email, autocomplete: "email", placeholder: "We'll fill it in at checkout" });
     emailIn.addEventListener("input", function () { self.contact.email = emailIn.value; self.updateSubmit(); });
@@ -1239,14 +1416,11 @@
     var ta = el("textarea", { class: "emb-input", rows: "3" }); ta.value = this.contact.notes;
     ta.addEventListener("input", function () { self.contact.notes = ta.value; });
     notes.appendChild(ta); p.appendChild(notes);
-    var chk = el("label", { class: "emb-check" }, '<input type="checkbox"' + (this.rights ? " checked" : "") + '><span>I have the rights to use this logo.</span>');
-    chk.querySelector("input").addEventListener("change", function (e) { self.rights = e.target.checked; self.updateSubmit(); });
-    p.appendChild(chk);
     this.problemsBox(p);
     var btn = el("button", { type: "button", class: "emb-primary", "data-submit": "" }, this.submitting ? "Preparing checkout…" : "Continue to checkout");
     btn.addEventListener("click", function () { self.submit(); });
     p.appendChild(btn);
-    p.appendChild(el("p", { class: "emb-help" }, "Your design is saved and attached to your order. Custom items can't be returned."));
+    p.appendChild(el("p", { class: "emb-help emb-disclaimer" }, "By clicking Continue to checkout, I certify that I have the right to use this logo. Your design is saved and attached to your order. Custom items can't be returned."));
     this.updateSubmit();
   };
 
@@ -1254,7 +1428,7 @@
     var b = this.panel && this.panel.querySelector("[data-submit]");
     if (!b) return;
     var em = this.contact.email.trim();
-    var ok = this.rights && (!em || /.+@.+\..+/.test(em)) && !this.submitting && !this.problems().length;
+    var ok = (!em || /.+@.+\..+/.test(em)) && !this.submitting && !this.problems().length;
     b.disabled = !ok;
   };
 
@@ -1290,9 +1464,10 @@
         customColorCount: this.customColorCount(),
         estimate: e ? { stitches: Math.round(e.stitches), low: Math.round(e.low), high: Math.round(e.high), fillSqIn: +e.fillSqIn.toFixed(2), satinSqIn: +e.satinSqIn.toFixed(2), outlineIn: +e.outlineIn.toFixed(1) } : null,
         background: this.logo.bgKept ? "kept" : this.logo.bgRemoved ? "removed" : "none",
-        insideAreasStitched: !!(this.logo.bgRemoved && this.logo.keepEnclosed)
+        insideAreasStitched: !!(this.logo.bgRemoved && this.logo.enclosedKept),
+        insideAreas: this.logo.bgRemoved ? (this.logo.keepEnclosed === true ? "stitched" : this.logo.keepEnclosed === false ? "removed" : "auto") : null
       }],
-      price: { perApron: q.price.perApron, tierPrice: q.price.tier.price, setupFee: q.price.setup, total: +q.price.total.toFixed(2), belowMinimum: this.qty < this.minimum() },
+      price: { perApron: q.price.perApron, tierPrice: q.price.tier.price, volumePercent: q.volume.percent, setupFee: q.price.setup, total: +q.price.total.toFixed(2), belowMinimum: this.qty < this.minimum() },
       logoFile: { name: this.logo.file.name, type: this.logo.file.type, size: this.logo.file.size }
     };
   };
@@ -1311,7 +1486,7 @@
     }).then(function (fd) {
       fd.append("spec", JSON.stringify(self.specData()));
       Object.keys(self.contact).forEach(function (k) { fd.append(k, self.contact[k]); });
-      fd.append("rights", self.rights ? "yes" : "no");
+      fd.append("rights", "certified"); // stated under the checkout button
       return fetch(self.cfg.proxyPath + "/submit", { method: "POST", body: fd, credentials: "same-origin" });
     }).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (j) {
