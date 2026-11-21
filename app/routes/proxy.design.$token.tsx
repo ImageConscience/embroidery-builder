@@ -101,7 +101,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (done === "approved") status = `<div class="status ok"><strong>Thank you, your design is approved.</strong> We'll start production.</div>`;
   if (done === "changes") status = `<div class="status"><strong>Thanks, we have your changes.</strong> We'll post an updated proof here.</div>`;
   if (done === "message") status += `<div class="status ok">Thanks, your message was sent to our team. We'll reply by email.</div>`;
-  if (done === "error") status += `<div class="status">Your message couldn't be sent. Please email us instead using the link below.</div>`;
+  // (the "error" notice is added below, once the shop's email address is known)
 
   const payBox =
     !paid && s.checkoutUrl && payment && s.stage !== "cancelled"
@@ -127,6 +127,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const mailto = settings.contactEmail
     ? `mailto:${settings.contactEmail}?subject=${encodeURIComponent(`Design ${ref}: question`)}&body=${encodeURIComponent(`Design ${ref}\n\n`)}`
     : "";
+  if (done === "error")
+    status += `<div class="status">Sorry, your message couldn't be sent.${mailto ? ` Please <a href="${esc(mailto)}">email our team</a> instead and mention design ${esc(ref)}.` : ` Please contact us and mention design ${esc(ref)}.`}</div>`;
   const contact = canEmail
     ? `<h2 style="font-size:20px;margin:28px 0 4px">Contact our team</h2>
     <p class="note">We'll reply by email, usually within one business day.</p>

@@ -949,7 +949,7 @@
       });
       p.appendChild(vc);
     } else {
-      p.appendChild(el("p", { class: "emb-label" }, esc(label || "Apron color") + ": " + esc(this.variant ? this.variant.title : "")));
+      p.appendChild(el("p", { class: "emb-label" }, label ? esc(label) + " (now " + esc(this.variant ? this.variant.title : "") + ")" : "Apron color: " + esc(this.variant ? this.variant.title : "")));
       var sw = el("div", { class: "emb-swatches" }), seen = {};
       vs.forEach(function (v) {
         if (seen[v.image]) return; seen[v.image] = 1;
@@ -1034,7 +1034,7 @@
         var bgName = L.bg && L.bg[0] > 235 && L.bg[1] > 235 && L.bg[2] > 235 ? "white" : colorName(rgbToHex(L.bg)).toLowerCase();
         var inside = el("fieldset", { class: "emb-inside" }, "<legend class='emb-label'>The " + esc(bgName) + " areas inside your logo</legend>");
         [
-          { v: "auto", t: "Decide for me (recommended)", d: "Letters and lines in that color are stitched; holes like the middle of an \"o\" show the apron." },
+          { v: "auto", t: "Decide for me (recommended)", d: bgName === "white" ? "White letters and lines are stitched; holes like the middle of an \"o\" show the apron." : "Large " + bgName + " areas are stitched; holes like the middle of an \"o\" show the apron." },
           { v: true, t: "Stitch them all", d: "Every " + bgName + " area inside the logo is stitched." },
           { v: false, t: "Show the apron through all of them", d: "Like the hole in a ring." }
         ].forEach(function (o) {
@@ -1343,7 +1343,7 @@
     var step = this.qtyStep(), min = this.minimum();
     n = Math.max(1, n || 1);
     if (step > 1) { n = Math.ceil(n / step) * step; min = Math.ceil(min / step) * step; }
-    return n;
+    return Math.max(n, min);
   };
 
   Builder.prototype.stepPrice = function (p) {

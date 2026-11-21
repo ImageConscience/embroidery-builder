@@ -207,7 +207,8 @@ async function submit({ request }: ActionFunctionArgs) {
       submissionId: sub.id,
     });
   }
-  await emailStaff(session.shop, {
+  // Not awaited: the customer shouldn't wait on the email server to reach checkout (emailStaff never throws).
+  void emailStaff(session.shop, {
     kind: "new",
     submissionId: sub.id,
     replyTo: email || undefined,
